@@ -416,6 +416,26 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
 .ansicht-row label{font-size:11px;color:var(--text);cursor:pointer;flex:1;}
 .ansicht-row input[type=checkbox]{accent-color:var(--accent);cursor:pointer;width:13px;height:13px;}
 
+/* ── Gebäudehülle-Modul ─────────────────────────────────────────────── */
+.huelle-section{margin-bottom:12px;}
+.huelle-section-title{font-size:9px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;}
+.huelle-table{width:100%;border-collapse:collapse;font-size:11px;font-family:'DM Mono',monospace;}
+.huelle-table th,.huelle-table td{border-bottom:1px solid var(--border);padding:4px 6px;text-align:left;}
+.huelle-table th{color:var(--muted);font-family:'DM Sans',sans-serif;font-weight:normal;font-size:10px;}
+.huelle-table td:first-child{color:var(--muted);}
+.huelle-result-box{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:10px;margin-top:4px;}
+.huelle-result-row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(42,48,80,.5);font-size:11px;}
+.huelle-result-row:last-child{border-bottom:none;font-weight:bold;}
+.huelle-result-row span:last-child{color:#80cbc4;font-family:'DM Mono',monospace;}
+.huelle-schematic{display:flex;flex-direction:column;gap:2px;margin-bottom:6px;}
+.huelle-floor{height:20px;border-radius:3px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;}
+.huelle-floor.roof{background:rgba(79,195,247,.1);border-color:var(--accent);color:var(--accent);}
+.huelle-floor.ground{background:rgba(76,175,80,.07);border-color:#4caf50;color:#4caf50;}
+.huelle-u-input{width:70px!important;text-align:right;}
+.huelle-badge{font-size:9px;padding:1px 5px;border-radius:5px;background:var(--border);color:var(--muted);vertical-align:middle;margin-left:3px;}
+.huelle-badge.auto{background:rgba(79,195,247,.12);color:var(--accent);}
+.huelle-badge.manual{background:rgba(249,168,37,.12);color:#f9a825;}
+
 /* Print */
 @media print{
   body{background:#fff!important;color:#111!important;}
@@ -1585,7 +1605,8 @@ function addGebaeude(opts={}){
            flaeche:null,stockwerke:opts.stockwerke!=null?opts.stockwerke:1,nutzung:opts.nutzung||'',
            polygon:null,polygonLayer:null,circleMarker:null,labelMarker:null,
            fromOsm:opts.fromOsm||false,osmId:opts.osmId||null,
-           baujahr: opts.baujahr!=null?opts.baujahr:null, abrissjahr: null, sanierungen: [], selected: false};
+           baujahr: opts.baujahr!=null?opts.baujahr:null, abrissjahr: null, sanierungen: [], selected: false,
+           huelle: null};
   // Aktives Szenario: Gebäude dem Szenario zuordnen
   const _activeSz = EL.szenarien.find(s => s.id === EL.aktivSzenario);
   if (_activeSz && !opts.id) { // nur neue Gebäude (nicht beim Laden)
@@ -1920,6 +1941,298 @@ function polygonAreaM2(coords){
   }
   return Math.abs(area/2);
 }
+
+// ── Gebäudehülle-Modul ────────────────────────────────────────────────────
+
+function calcPerimeterM(coords) {
+  if (!coords || coords.length < 2) return 0;
+  const R = 6371000;
+  let peri = 0;
+  for (let i = 0; i < coords.length; i++) {
+    const a = coords[i], b = coords[(i + 1) % coords.length];
+    const latMid = (a.lat + b.lat) / 2 * Math.PI / 180;
+    const dy = (b.lat - a.lat) * Math.PI / 180 * R;
+    const dx = (b.lng - a.lng) * Math.PI / 180 * R * Math.cos(latMid);
+    peri += Math.sqrt(dx * dx + dy * dy);
+  }
+  return peri;
+}
+
+function huelleUDefaults(baujahr) {
+  const y = parseInt(baujahr) || 1970;
+  if (y < 1919) return { wand: 2.10, dach: 1.40, fenster: 5.00, boden: 1.20 };
+  if (y <= 1948) return { wand: 2.00, dach: 1.30, fenster: 4.80, boden: 1.10 };
+  if (y <= 1957) return { wand: 1.80, dach: 1.10, fenster: 4.60, boden: 1.00 };
+  if (y <= 1968) return { wand: 1.60, dach: 0.90, fenster: 4.30, boden: 0.90 };
+  if (y <= 1977) return { wand: 1.20, dach: 0.70, fenster: 3.10, boden: 0.80 };
+  if (y <= 1983) return { wand: 0.90, dach: 0.45, fenster: 2.80, boden: 0.70 };
+  if (y <= 1994) return { wand: 0.60, dach: 0.35, fenster: 2.00, boden: 0.60 };
+  if (y <= 2001) return { wand: 0.45, dach: 0.28, fenster: 1.80, boden: 0.50 };
+  if (y <= 2008) return { wand: 0.35, dach: 0.22, fenster: 1.50, boden: 0.40 };
+  if (y <= 2015) return { wand: 0.28, dach: 0.18, fenster: 1.30, boden: 0.35 };
+  return            { wand: 0.20, dach: 0.15, fenster: 1.10, boden: 0.30 };
+}
+
+function huelleGetOrInit(g) {
+  if (!g.huelle) {
+    g.huelle = {
+      dachtyp: 'sattel', fensterAnteil: 0.20, etagenhoehe: 3.0,
+      tInnen: 20, tAussen: -12,
+      uWand: null, uDach: null, uFenster: null, uBoden: null
+    };
+  }
+  return g.huelle;
+}
+
+function calcHuelleGeometry(g) {
+  const h = huelleGetOrInit(g);
+  const flaeche = g.flaeche || 0;
+  const stockwerke = g.stockwerke || 1;
+  const hoehe = stockwerke * h.etagenhoehe;
+  const peri = g.polygon ? calcPerimeterM(g.polygon) : 4 * Math.sqrt(flaeche);
+  const wandRoh = peri * hoehe;
+  const fensterFlaeche = wandRoh * h.fensterAnteil;
+  const wandNetto = wandRoh - fensterFlaeche;
+  const dachFaktor = { sattel: 1.25, walm: 1.20, pult: 1.10, flach: 1.00 }[h.dachtyp] || 1.20;
+  return { peri, hoehe, wandRoh, fensterFlaeche, wandNetto,
+           dachFlaeche: flaeche * dachFaktor, bodenFlaeche: flaeche };
+}
+
+function calcHuelleEnergy(g) {
+  const h = huelleGetOrInit(g);
+  const defs = huelleUDefaults(g.baujahr);
+  const geo = calcHuelleGeometry(g);
+  const uW = h.uWand    !== null ? h.uWand    : defs.wand;
+  const uD = h.uDach    !== null ? h.uDach    : defs.dach;
+  const uF = h.uFenster !== null ? h.uFenster : defs.fenster;
+  const uB = h.uBoden   !== null ? h.uBoden   : defs.boden;
+  const htWand    = geo.wandNetto      * uW;
+  const htDach    = geo.dachFlaeche   * uD;
+  const htFenster = geo.fensterFlaeche * uF;
+  const htBoden   = geo.bodenFlaeche  * uB;
+  const htGesamt  = htWand + htDach + htFenster + htBoden;
+  const dt = h.tInnen - h.tAussen;
+  // Include 50 % ventilation heat loss surcharge (simplified n=0.5 1/h)
+  const heizlastKW = htGesamt * 1.5 * dt / 1000;
+  const nutzflaeche = (g.flaeche || 0) * (g.stockwerke || 1) * 0.8;
+  const waermeMWh = heizlastKW * 2000 / 1000;
+  const spezKWh = nutzflaeche > 0 ? waermeMWh * 1000 / nutzflaeche : 0;
+  return { htGesamt, htWand, htDach, htFenster, htBoden,
+           heizlastKW, waermeMWh, spezKWh, geo, uW, uD, uF, uB, dt };
+}
+
+let _huellenPanelGebId = null;
+
+function openHuellePanel(id) {
+  _huellenPanelGebId = id;
+  const panel = document.getElementById('huellen-panel');
+  panel.style.display = 'flex';
+  panel.classList.add('visible');
+  renderHuellePanel(id);
+}
+
+function renderHuellePanel(id) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  const h = huelleGetOrInit(g);
+  const defs = huelleUDefaults(g.baujahr);
+  const res = calcHuelleEnergy(g);
+  const geo = res.geo;
+  const f1 = v => (+v).toLocaleString('de-DE', { maximumFractionDigits: 1 });
+  const f2 = v => (+v).toLocaleString('de-DE', { maximumFractionDigits: 2 });
+  const uVal = (key, def) => h[key] !== null ? h[key] : def;
+  const uBadge = key => h[key] !== null
+    ? '<span class="huelle-badge manual">manuell</span>'
+    : '<span class="huelle-badge auto">auto</span>';
+
+  // Floor schematic
+  let floors = '';
+  for (let i = g.stockwerke || 1; i >= 1; i--) {
+    floors += `<div class="huelle-floor">EG+${i-1} &nbsp;·&nbsp; ≈ ${Math.round(g.flaeche || 0)} m²</div>`;
+  }
+  const dachIcons = { flach:'▬', sattel:'⌒', walm:'▲', pult:'◸' };
+
+  document.getElementById('huellen-panel-content').innerHTML = `
+    <div>
+      <div style="font-size:12px;margin-bottom:10px;">
+        <b>${escHtml(g.name)}</b> &nbsp;·&nbsp;
+        Baujahr ${g.baujahr || '—'} &nbsp;·&nbsp;
+        ${g.stockwerke || 1} Geschoss(e) &nbsp;·&nbsp;
+        ${Math.round(g.flaeche || 0)} m² BGF
+      </div>
+
+      <div class="huelle-section">
+        <div class="huelle-section-title">Gebäudeschema (2,5D)</div>
+        <div class="huelle-schematic">
+          <div class="huelle-floor roof">${dachIcons[h.dachtyp] || '▲'} Dach (${h.dachtyp}) &nbsp;·&nbsp; ${f1(geo.dachFlaeche)} m²</div>
+          ${floors}
+          <div class="huelle-floor ground">⬛ Bodenplatte &nbsp;·&nbsp; ${f1(geo.bodenFlaeche)} m²</div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);">
+          Außenwand gesamt: ${f1(geo.wandRoh)} m² &nbsp;(Umfang ${f1(geo.peri)} m · Höhe ${f1(geo.hoehe)} m)
+        </div>
+      </div>
+
+      <div class="huelle-section">
+        <div class="huelle-section-title">Parameter</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+          <div class="inp-group">
+            <div class="inp-label">Dachtyp</div>
+            <select class="inp-field" onchange="huelleSetParam(${id},'dachtyp',this.value)">
+              <option value="sattel" ${h.dachtyp==='sattel'?'selected':''}>Satteldach</option>
+              <option value="walm"   ${h.dachtyp==='walm'  ?'selected':''}>Walmdach</option>
+              <option value="pult"   ${h.dachtyp==='pult'  ?'selected':''}>Pultdach</option>
+              <option value="flach"  ${h.dachtyp==='flach' ?'selected':''}>Flachdach</option>
+            </select>
+          </div>
+          <div class="inp-group">
+            <div class="inp-label">Fensteranteil %</div>
+            <input class="inp-field" type="number" min="5" max="80" step="1"
+              value="${Math.round(h.fensterAnteil * 100)}"
+              onchange="huelleSetParam(${id},'fensterAnteil',this.value/100)"/>
+          </div>
+          <div class="inp-group">
+            <div class="inp-label">Etagenhöhe m</div>
+            <input class="inp-field" type="number" min="2.2" max="5.0" step="0.1"
+              value="${h.etagenhoehe}"
+              onchange="huelleSetParam(${id},'etagenhoehe',parseFloat(this.value))"/>
+          </div>
+          <div class="inp-group">
+            <div class="inp-label">T-innen °C</div>
+            <input class="inp-field" type="number" min="15" max="25" step="0.5"
+              value="${h.tInnen}"
+              onchange="huelleSetParam(${id},'tInnen',parseFloat(this.value))"/>
+          </div>
+          <div class="inp-group">
+            <div class="inp-label">T-außen (Norm) °C</div>
+            <input class="inp-field" type="number" min="-25" max="5" step="0.5"
+              value="${h.tAussen}"
+              onchange="huelleSetParam(${id},'tAussen',parseFloat(this.value))"/>
+          </div>
+        </div>
+      </div>
+
+      <div class="huelle-section">
+        <div class="huelle-section-title">U-Werte W/(m²K) — Schätzwerte aus Baujahr, manuell überschreibbar</div>
+        <table class="huelle-table">
+          <thead><tr><th>Bauteil</th><th>Fläche m²</th><th>U-Wert</th><th>H<sub>T</sub> W/K</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Außenwand (opak)</td><td>${f1(geo.wandNetto)}</td>
+              <td><input class="inp-field huelle-u-input" type="number" min="0.05" max="3.0" step="0.01"
+                value="${f2(uVal('uWand',defs.wand))}"
+                title="Schätzwert: ${f2(defs.wand)} W/(m²K)"
+                onchange="huelleSetU(${id},'uWand',this.value)"/>${uBadge('uWand')}</td>
+              <td>${f1(res.htWand)}</td>
+            </tr>
+            <tr>
+              <td>Fenster/Türen</td><td>${f1(geo.fensterFlaeche)}</td>
+              <td><input class="inp-field huelle-u-input" type="number" min="0.5" max="6.0" step="0.01"
+                value="${f2(uVal('uFenster',defs.fenster))}"
+                title="Schätzwert: ${f2(defs.fenster)} W/(m²K)"
+                onchange="huelleSetU(${id},'uFenster',this.value)"/>${uBadge('uFenster')}</td>
+              <td>${f1(res.htFenster)}</td>
+            </tr>
+            <tr>
+              <td>Dach / oberste Decke</td><td>${f1(geo.dachFlaeche)}</td>
+              <td><input class="inp-field huelle-u-input" type="number" min="0.05" max="2.0" step="0.01"
+                value="${f2(uVal('uDach',defs.dach))}"
+                title="Schätzwert: ${f2(defs.dach)} W/(m²K)"
+                onchange="huelleSetU(${id},'uDach',this.value)"/>${uBadge('uDach')}</td>
+              <td>${f1(res.htDach)}</td>
+            </tr>
+            <tr>
+              <td>Bodenplatte / Kellerdecke</td><td>${f1(geo.bodenFlaeche)}</td>
+              <td><input class="inp-field huelle-u-input" type="number" min="0.05" max="2.0" step="0.01"
+                value="${f2(uVal('uBoden',defs.boden))}"
+                title="Schätzwert: ${f2(defs.boden)} W/(m²K)"
+                onchange="huelleSetU(${id},'uBoden',this.value)"/>${uBadge('uBoden')}</td>
+              <td>${f1(res.htBoden)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="huelle-section">
+        <div class="huelle-section-title">Ergebnisse Transmissionsverluste</div>
+        <div class="huelle-result-box">
+          <div class="huelle-result-row">
+            <span>Transmissions-Leitkoeffizient H<sub>T</sub></span>
+            <span>${f1(res.htGesamt)} W/K</span>
+          </div>
+          <div class="huelle-result-row">
+            <span>Lüftungszuschlag (50 % Pauschale)</span>
+            <span>${f1(res.htGesamt * 0.5)} W/K</span>
+          </div>
+          <div class="huelle-result-row">
+            <span>Normheizlast bei ΔT = ${res.dt} K</span>
+            <span>${f1(res.heizlastKW)} kW</span>
+          </div>
+          <div class="huelle-result-row">
+            <span>Wärmebedarf (≈ 2 000 Volllaststunden)</span>
+            <span>${f1(res.waermeMWh)} MWh/a</span>
+          </div>
+          <div class="huelle-result-row">
+            <span>Spez. Heizenergiebedarf</span>
+            <span>${f1(res.spezKWh)} kWh/m²a</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+        <button class="btn-xs green" onclick="applyHuelleToBuilding(${id})" style="flex:1;padding:5px 8px;">
+          ↑ Heizlast &amp; Wärme in Gebäude übernehmen
+        </button>
+        <button class="btn-xs" onclick="huelleResetU(${id})" title="Alle U-Werte auf Schätzwerte zurücksetzen">⟳ Auto-U</button>
+        <button class="btn-xs red" onclick="document.getElementById('huellen-panel').classList.remove('visible');document.getElementById('huellen-panel').style.display='none';">Schließen</button>
+      </div>
+    </div>
+  `;
+}
+
+function huelleSetParam(id, key, value) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  huelleGetOrInit(g)[key] = value;
+  renderHuellePanel(id);
+}
+
+function huelleSetU(id, key, value) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  huelleGetOrInit(g)[key] = parseFloat(value);
+  renderHuellePanel(id);
+}
+
+function huelleResetU(id) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  const h = huelleGetOrInit(g);
+  h.uWand = null; h.uDach = null; h.uFenster = null; h.uBoden = null;
+  renderHuellePanel(id);
+}
+
+function applyHuelleToBuilding(id) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  const res = calcHuelleEnergy(g);
+  g.heizlast     = Math.round(res.heizlastKW * 10) / 10;
+  g.waerme       = Math.round(res.waermeMWh  * 10) / 10;
+  const nutz = (g.flaeche || 0) * (g.stockwerke || 1) * 0.8;
+  if (nutz > 0) {
+    g.spez         = Math.round(g.waerme * 1000 / nutz * 10) / 10;
+    g.spezHeizlast = Math.round(g.heizlast * 1000 / nutz * 10) / 10;
+  }
+  const fields = [['waerme','waerme'],['spez','spez'],['heizlast','heizlast'],['spezHeizlast','spezhl']];
+  fields.forEach(([prop, attr]) => {
+    const el = document.querySelector(`[data-${attr}="${id}"]`);
+    if (el) { el.value = g[prop]; el.style.color = '#26a69a'; }
+  });
+  updateViz(); updateTotals(); recalcNetz();
+  renderHuellePanel(id);
+}
+
+// ── Ende Gebäudehülle-Modul ───────────────────────────────────────────────
 
 function updateViz(){
   const [sMin,sMax]=getSizeRange();
@@ -3746,6 +4059,7 @@ function renderList(){
         <button class="btn-xs blue" onclick="startDraw(${g.id})">&#9998; ${g.polygon ? 'Neu' : 'Zeichnen'}</button>
         ${g.polygon ? '<button class="btn-xs purple" onclick="flyTo(' + g.id + ')">&#8982;</button>' : ''}
         <button class="btn-xs" onclick="togglePlanPanel(${g.id})" title="Planung & Sanierung">🔧 Planen</button>
+        <button class="btn-xs" onclick="openHuellePanel(${g.id})" title="Gebäudehülle &amp; Transmissionsverluste" style="border-color:#26a69a;color:#80cbc4;">🏠 Hülle</button>
         <button class="btn-xs" onclick="removeGebaeude(${g.id})" title="Löschen" style="margin-left:auto">&#10005;</button>
       </div>
       
@@ -3795,7 +4109,8 @@ function exportJSON(){
     gebaeude: gebaeude.map(g => ({
       id: g.id, name: g.name, waerme: g.waerme, heizlast: g.heizlast, spez: g.spez, spezHeizlast: g.spezHeizlast,
       flaeche: g.flaeche, nutzung: g.nutzung, fromOsm: g.fromOsm, osmId: g.osmId, polygon: g.polygon,
-      baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen
+      baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen,
+      huelle: g.huelle || null
     })),
     netz: {
       zentrale: document.getElementById('netz-zentrale').value,
@@ -4327,6 +4642,7 @@ function importJSON(event) {
             newG.abrissjahr = g.abrissjahr;
             newG.sanierungen = g.sanierungen || [];
             newG.nutzung = g.nutzung || '';
+            newG.huelle = g.huelle || null;
             if (g.id >= idCounter) idCounter = g.id + 1;
          });
       }
@@ -4444,6 +4760,7 @@ function loadGebaeudeFromParent(gebaeudeArray) {
     newG.abrissjahr = g.abrissjahr;
     newG.sanierungen = g.sanierungen || [];
     newG.nutzung = g.nutzung || '';
+    newG.huelle = g.huelle || null;
     if (g.id >= idCounter) idCounter = g.id + 1;
   });
   renderList();
@@ -4678,7 +4995,7 @@ function autosave() {
         spez: g.spez, spezHeizlast: g.spezHeizlast, flaeche: g.flaeche,
         nutzung: g.nutzung, fromOsm: g.fromOsm, osmId: g.osmId,
         polygon: g.polygon, baujahr: g.baujahr, abrissjahr: g.abrissjahr,
-        sanierungen: g.sanierungen
+        sanierungen: g.sanierungen, huelle: g.huelle || null
       })),
       netz: {
         zentrale: document.getElementById('netz-zentrale').value,
@@ -4732,7 +5049,8 @@ function loadAutosave() {
       project.gebaeude.forEach(g => {
         const newG = addGebaeude({ id: g.id, coords: g.polygon, name: g.name, fromOsm: g.fromOsm, osmId: g.osmId });
         Object.assign(newG, { waerme: g.waerme, heizlast: g.heizlast, spez: g.spez, spezHeizlast: g.spezHeizlast,
-          flaeche: g.flaeche, nutzung: g.nutzung||'', baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen||[] });
+          flaeche: g.flaeche, nutzung: g.nutzung||'', baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen||[],
+          huelle: g.huelle||null });
         if (g.id >= idCounter) idCounter = g.id + 1;
       });
     }
@@ -15970,6 +16288,15 @@ renderList();
 tryRestoreAutosave();
 elInit();   // Elektro-Modul starten (nach map-Init, einmalig)
 </script>
+<!-- ── Gebäudehülle-Beurteilung ──────────────────────────────────────── -->
+<div class="float-panel" id="huellen-panel" style="border:1px solid #26a69a;min-width:500px;max-height:88vh;overflow:hidden;display:none;flex-direction:column;">
+  <div class="panel-drag-handle" onmousedown="startDrag(event,'huellen-panel')">
+    <span style="color:#80cbc4;font-size:12px">🏠 Gebäudehülle &amp; Transmissionsverluste</span>
+    <span class="drag-dots">⠿</span>
+  </div>
+  <div id="huellen-panel-content" style="padding:10px 14px;overflow-y:auto;flex:1;"></div>
+</div>
+
 <script src="../src/ui/legacyMasterBridge.js"></script>
 </body>
 </html>
