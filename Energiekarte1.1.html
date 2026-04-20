@@ -549,6 +549,9 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
     <button class="tool-btn" id="btn-besch-toggle" onclick="toggleBeschriftungenPanel()" title="Beschriftungen setzen" style="border-color:#ce93d8;color:#ce93d8;">
       <span class="t-icon">🏷</span> Labels
     </button>
+    <button class="tool-btn" id="btn-array-toggle" onclick="toggleArrayPanel()" title="Gebäude-Array – Reihe duplizieren" style="border-color:#7e57c2;color:#b39ddb;">
+      <span class="t-icon">⊞</span> Array
+    </button>
     <button class="tool-btn" id="btn-tile" onclick="toggleTile()" style="border-color:#607d8b;color:#90a4ae;">🛰</button>
   </div>
 </header>
@@ -3253,6 +3256,7 @@ function hidePanels(){
   document.getElementById('bem-panel').classList.remove('visible');
   document.getElementById('flaechen-panel').classList.remove('visible');
   document.getElementById('beschriftungen-panel').classList.remove('visible');
+  document.getElementById('array-panel').classList.remove('visible');
   document.getElementById('btn-netz-toggle').classList.remove('active');
   document.getElementById('btn-fliessgewaesser-toggle').classList.remove('active');
   document.getElementById('btn-lwwp-toggle').classList.remove('active');
@@ -3263,6 +3267,7 @@ function hidePanels(){
   document.getElementById('btn-bem-toggle').classList.remove('active');
   document.getElementById('btn-flaechen-toggle').classList.remove('active');
   document.getElementById('btn-besch-toggle').classList.remove('active');
+  document.getElementById('btn-array-toggle').classList.remove('active');
   if (isPlacingLwWp) togglePlaceLwWp();
   if (isPlacingParametric) cancelParametricPlace();
   if (isDrawingFlaeche) flaecheCancel();
@@ -4290,6 +4295,7 @@ function renderList(){
         ${g.polygon ? '<button class="btn-xs purple" onclick="flyTo(' + g.id + ')">&#8982;</button>' : ''}
         <button class="btn-xs" onclick="togglePlanPanel(${g.id})" title="Planung & Sanierung">🔧 Planen</button>
         <button class="btn-xs" onclick="openHuellePanel(${g.id})" title="Gebäudehülle &amp; Transmissionsverluste" style="border-color:#26a69a;color:#80cbc4;">🏠 Hülle</button>
+        <button class="btn-xs" onclick="dupliziereGebaeude(${g.id})" title="Gebäude duplizieren (20 m versetzt)" style="border-color:#b39ddb;color:#b39ddb;">📋 Kopie</button>
         <button class="btn-xs" onclick="removeGebaeude(${g.id})" title="Löschen" style="margin-left:auto">&#10005;</button>
       </div>
       
@@ -16990,6 +16996,71 @@ function bemassungenRestoreFromJSON(data) {
 
 // ── Parametrische Gebäudeplatzierung ─────────────────────────────────────
 
+// ── Gebäude duplizieren & Array ───────────────────────────────────────────
+
+function shiftLatLng(point, dxM, dyM) {
+  const lat = Array.isArray(point) ? point[0] : point.lat;
+  const lng = Array.isArray(point) ? point[1] : point.lng;
+  const R = 6371000;
+  const latRad = lat * Math.PI / 180;
+  const newLat = lat + (dyM / R) * (180 / Math.PI);
+  const newLng = lng + (dxM / R) * (180 / Math.PI) / Math.cos(latRad);
+  return Array.isArray(point) ? [newLat, newLng] : { lat: newLat, lng: newLng };
+}
+
+function dupliziereGebaeude(id, dxM, dyM) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  if (dxM === undefined) dxM = 20;
+  if (dyM === undefined) dyM = 0;
+  const newCoords = g.polygon ? g.polygon.map(p => shiftLatLng(p, dxM, dyM)) : null;
+  const newG = addGebaeude({
+    name: g.name + ' (Kopie)',
+    waerme: g.waerme, spez: g.spez, heizlast: g.heizlast, spezHeizlast: g.spezHeizlast,
+    stockwerke: g.stockwerke, nutzung: g.nutzung, baujahr: g.baujahr,
+    coords: newCoords
+  });
+  if (g.huelle) newG.huelle = JSON.parse(JSON.stringify(g.huelle));
+  return newG;
+}
+
+function toggleArrayPanel() {
+  const p = document.getElementById('array-panel');
+  const btn = document.getElementById('btn-array-toggle');
+  const isVis = p.classList.contains('visible');
+  hidePanels();
+  if (!isVis) {
+    p.classList.add('visible');
+    btn.classList.add('active');
+    renderArrayGebaeudeSelect();
+  } else {
+    btn.classList.remove('active');
+  }
+}
+
+function renderArrayGebaeudeSelect() {
+  const sel = document.getElementById('array-source-select');
+  sel.innerHTML = '<option value="">Gebäude wählen…</option>';
+  gebaeude.forEach(g => {
+    sel.innerHTML += `<option value="${g.id}">${escHtml(g.name)}</option>`;
+  });
+}
+
+function erstelleGebaeudeArray() {
+  const sourceId = parseInt(document.getElementById('array-source-select').value);
+  if (!sourceId) { showHint('Bitte Quellgebäude wählen.'); return; }
+  const anzahl  = parseInt(document.getElementById('array-count').value)   || 3;
+  const abstand = parseFloat(document.getElementById('array-spacing').value) || 25;
+  const winkel  = parseFloat(document.getElementById('array-angle').value)  || 0;
+  const winkelRad = winkel * Math.PI / 180;
+  const dxPerStep = abstand * Math.sin(winkelRad);
+  const dyPerStep = abstand * Math.cos(winkelRad);
+  for (let i = 1; i <= anzahl; i++) {
+    dupliziereGebaeude(sourceId, dxPerStep * i, dyPerStep * i);
+  }
+  showHint(`${anzahl} Gebäude-Kopien erstellt.`);
+}
+
 function calcRectanglePolygon(lat, lng, widthM, lengthM, rotDeg) {
   const R = 6371000;
   const latRad = lat * Math.PI / 180;
@@ -17369,6 +17440,45 @@ elInit();   // Elektro-Modul starten (nach map-Init, einmalig)
     <span class="drag-dots">⠿</span>
   </div>
   <div id="huellen-panel-content" style="padding:10px 14px;overflow-y:auto;flex:1;"></div>
+</div>
+
+<!-- ── Gebäude-Array / Duplizieren ──────────────────────────────────────── -->
+<div class="float-panel" id="array-panel" style="border:1px solid #7e57c2;min-width:300px;">
+  <div class="panel-drag-handle" onmousedown="startDrag(event,'array-panel')">
+    <span style="color:#b39ddb;font-size:12px">⊞ Gebäude-Array &amp; Duplizieren</span>
+    <span class="drag-dots">⠿</span>
+  </div>
+  <div class="panel-info">Quellgebäude wählen und als Reihe auf der Karte vervielfältigen. Einzelne Kopie: Taste „📋 Kopie" im Gebäude-Card.</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">
+    <div class="inp-group" style="grid-column:1/-1">
+      <div class="inp-label">Quellgebäude</div>
+      <select class="inp-field" id="array-source-select"></select>
+    </div>
+    <div class="inp-group">
+      <div class="inp-label">Anzahl Kopien</div>
+      <input class="inp-field" id="array-count" type="number" min="1" max="50" value="3"/>
+    </div>
+    <div class="inp-group">
+      <div class="inp-label">Abstand m</div>
+      <input class="inp-field" id="array-spacing" type="number" min="1" value="25"/>
+    </div>
+    <div class="inp-group" style="grid-column:1/-1">
+      <div class="inp-label">Richtung ° (0 = Nord · 90 = Ost · 180 = Süd · 270 = West)</div>
+      <input class="inp-field" id="array-angle" type="number" min="0" max="360" value="90"/>
+      <div class="param-rotation-btns" style="margin-top:4px;">
+        <button onclick="document.getElementById('array-angle').value=0">N</button>
+        <button onclick="document.getElementById('array-angle').value=90">O</button>
+        <button onclick="document.getElementById('array-angle').value=180">S</button>
+        <button onclick="document.getElementById('array-angle').value=270">W</button>
+      </div>
+    </div>
+  </div>
+  <div class="panel-btns">
+    <button class="tool-btn" onclick="erstelleGebaeudeArray()" style="border-color:#7e57c2;color:#b39ddb;">
+      <span class="t-icon">⊞</span> Array erstellen
+    </button>
+    <button class="btn-secondary" onclick="toggleArrayPanel()">Schließen</button>
+  </div>
 </div>
 
 <script src="../src/ui/legacyMasterBridge.js"></script>
