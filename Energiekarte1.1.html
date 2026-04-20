@@ -416,6 +416,19 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
 .ansicht-row label{font-size:11px;color:var(--text);cursor:pointer;flex:1;}
 .ansicht-row input[type=checkbox]{accent-color:var(--accent);cursor:pointer;width:13px;height:13px;}
 
+/* ── Flächen-Layer ──────────────────────────────────────────────────────── */
+.flaechen-list{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;margin-top:8px;}
+.flaechen-list::-webkit-scrollbar{width:3px;}
+.flaechen-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.flaeche-item{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:5px 8px;font-size:11px;}
+.flaeche-swatch{width:14px;height:14px;border-radius:3px;flex-shrink:0;border:1px solid rgba(255,255,255,.15);}
+/* ── Beschriftungen ─────────────────────────────────────────────────────── */
+.beschriftung-marker{font-family:'DM Sans',sans-serif;font-weight:600;white-space:nowrap;cursor:pointer;text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 8px rgba(0,0,0,.6);user-select:none;line-height:1.2;}
+.beschriftung-marker:hover{opacity:.8;}
+.beschriftungen-list{display:flex;flex-direction:column;gap:3px;max-height:180px;overflow-y:auto;margin-top:6px;}
+.beschriftungen-list::-webkit-scrollbar{width:3px;}
+.beschriftungen-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.besch-item{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;}
 /* ── Raumprogramm ───────────────────────────────────────────────────────── */
 .rp-list{display:flex;flex-direction:column;gap:3px;max-height:200px;overflow-y:auto;margin-top:6px;}
 .rp-list::-webkit-scrollbar{width:3px;}
@@ -529,6 +542,12 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
     </button>
     <button class="tool-btn amber" id="btn-bem-toggle" onclick="toggleBemPanel()" title="Bemaßungslinien messen">
       <span class="t-icon">📏</span> Messen
+    </button>
+    <button class="tool-btn" id="btn-flaechen-toggle" onclick="toggleFlaechenPanel()" title="Flächen zeichnen" style="border-color:#388e3c;color:#81c784;">
+      <span class="t-icon">⬛</span> Flächen
+    </button>
+    <button class="tool-btn" id="btn-besch-toggle" onclick="toggleBeschriftungenPanel()" title="Beschriftungen setzen" style="border-color:#ce93d8;color:#ce93d8;">
+      <span class="t-icon">🏷</span> Labels
     </button>
     <button class="tool-btn" id="btn-tile" onclick="toggleTile()" style="border-color:#607d8b;color:#90a4ae;">🛰</button>
   </div>
@@ -1320,6 +1339,28 @@ const STRASSEN_TYPEN = {
   fussweg:       { label: 'Fuß-/Radweg',           breite: 2, farbe: '#8d6e63', rand: '#5d4037' },
 };
 
+// ── Flächen-Layer ─────────────────────────────────────────────────────────
+let flaechen = [];
+let flaecheIdCounter = 1;
+let isDrawingFlaeche = false;
+let flaecheDrawPunkte = [];
+let flaecheDrawPolyline = null;
+let flaecheStartMarker = null;
+let flaechenLayerGroup = null;
+const FLAECHEN_TYPEN = {
+  gruen:     { label: 'Grünfläche',   farbe: '#388e3c', rand: '#1b5e20', opacity: 0.35 },
+  parkplatz: { label: 'Parkplatz',    farbe: '#546e7a', rand: '#263238', opacity: 0.40 },
+  innenhof:  { label: 'Innenhof',     farbe: '#a1887f', rand: '#5d4037', opacity: 0.30 },
+  wasser:    { label: 'Wasserfläche', farbe: '#1976d2', rand: '#0d47a1', opacity: 0.35 },
+  sonstiges: { label: 'Sonstiges',    farbe: '#757575', rand: '#424242', opacity: 0.25 },
+};
+
+// ── Beschriftungen ────────────────────────────────────────────────────────
+let beschriftungen = [];
+let beschriftungIdCounter = 1;
+let isPlacingBeschriftung = false;
+let beschriftungenLayerGroup = null;
+
 let overlayLayer = null;
 let overlayMarkerNW = null;
 let overlayMarkerSE = null;
@@ -1496,8 +1537,10 @@ const esriTile = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/servic
 osmTile.addTo(map);
 fliessgewaesserLayerGroup = L.layerGroup();
 lwWpLayerGroup = L.layerGroup();
-strassenLayerGroup  = L.layerGroup().addTo(map);
-bemassungLayerGroup = L.layerGroup().addTo(map);
+strassenLayerGroup      = L.layerGroup().addTo(map);
+flaechenLayerGroup      = L.layerGroup().addTo(map);
+bemassungLayerGroup     = L.layerGroup().addTo(map);
+beschriftungenLayerGroup = L.layerGroup().addTo(map);
 let currentTile = 'osm';
 function toggleTile(){
   if(currentTile==='osm'){ map.removeLayer(osmTile); esriTile.addTo(map); currentTile='esri'; document.getElementById('btn-tile').textContent='🗺 OSM'; }
@@ -2572,6 +2615,34 @@ function finishAreaDraw() {
 }
 
 map.on('click',e=>{
+  if (isPlacingBeschriftung) {
+    const text  = (document.getElementById('besch-text').value  || '').trim();
+    const size  = parseInt(document.getElementById('besch-size').value)  || 14;
+    const color = document.getElementById('besch-color').value || '#ffffff';
+    if (!text) { showHint('Bitte zuerst einen Text eingeben.'); return; }
+    const b = { id: beschriftungIdCounter++, text, lat: e.latlng.lat, lng: e.latlng.lng, size, color, _layer: null };
+    beschriftungen.push(b);
+    renderBeschriftungOnMap(b);
+    renderBeschriftungenList();
+    showHint('Label gesetzt. Weiteres Klicken platziert weitere Labels. [Esc] zum Beenden.');
+    return;
+  }
+  if (isDrawingFlaeche) {
+    if (flaecheDrawPunkte.length > 0) {
+      const first = flaecheDrawPunkte[0];
+      const dist = Math.hypot(e.latlng.lat - first.lat, e.latlng.lng - first.lng);
+      if (dist < 0.00005 && flaecheDrawPunkte.length >= 3) { flaecheFinish(); return; }
+    }
+    if (flaecheDrawPunkte.length === 0) {
+      const icon = L.divIcon({ className: 'area-start-handle', html: '', iconSize: [14, 14] });
+      flaecheStartMarker = L.marker(e.latlng, { icon, zIndexOffset: 2000 })
+        .addTo(map)
+        .on('click', ev => { L.DomEvent.stopPropagation(ev); flaecheFinish(); });
+    }
+    flaecheDrawPunkte.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+    flaecheRedrawPreview();
+    return;
+  }
   if (isDrawingBemasssung) {
     if (!bemassungP1) {
       bemassungP1 = { lat: e.latlng.lat, lng: e.latlng.lng };
@@ -2645,6 +2716,11 @@ map.on('click',e=>{
 });
 
 map.on('contextmenu', e => {
+  if(isDrawingFlaeche) {
+    if (flaecheDrawPunkte.length >= 3) flaecheFinish();
+    else flaecheCancel();
+    return;
+  }
   if(isDrawingStrasse) {
     if (strasseDrawPunkte.length >= 2) strasseFinish();
     else strasseCancel();
@@ -2670,6 +2746,7 @@ map.on('contextmenu', e => {
 map.on('dblclick',e=>{
   L.DomEvent.stopPropagation(e);
   L.DomEvent.preventDefault(e);
+  if(isDrawingFlaeche && flaecheDrawPunkte.length >= 3) { flaecheFinish(); return; }
   if(isDrawingStrasse && strasseDrawPunkte.length >= 2) { strasseFinish(); return; }
   if(isDrawingRiver && riverPoints.length >= 2) { finishDrawRiver(); return; }
   if(isDrawingTrasse) { toggleDrawTrasse(); }
@@ -2694,8 +2771,10 @@ map.on('zoomend', function() {
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
     if (isPlacingParametric) cancelParametricPlace();
+    if (isDrawingFlaeche) flaecheCancel();
     if (isDrawingStrasse) strasseCancel();
     if (isDrawingBemasssung) cancelBemassungDraw();
+    if (isPlacingBeschriftung) cancelBeschriftungPlace();
     if (isPlacingLwWp) togglePlaceLwWp();
     if(isDrawingRiver) toggleDrawRiver();
     if(isDrawingTrasse) toggleDrawTrasse();
@@ -3172,6 +3251,8 @@ function hidePanels(){
   document.getElementById('parametric-panel').classList.remove('visible');
   document.getElementById('strassen-panel').classList.remove('visible');
   document.getElementById('bem-panel').classList.remove('visible');
+  document.getElementById('flaechen-panel').classList.remove('visible');
+  document.getElementById('beschriftungen-panel').classList.remove('visible');
   document.getElementById('btn-netz-toggle').classList.remove('active');
   document.getElementById('btn-fliessgewaesser-toggle').classList.remove('active');
   document.getElementById('btn-lwwp-toggle').classList.remove('active');
@@ -3180,10 +3261,14 @@ function hidePanels(){
   document.getElementById('btn-parametric-toggle').classList.remove('active');
   document.getElementById('btn-strassen-toggle').classList.remove('active');
   document.getElementById('btn-bem-toggle').classList.remove('active');
+  document.getElementById('btn-flaechen-toggle').classList.remove('active');
+  document.getElementById('btn-besch-toggle').classList.remove('active');
   if (isPlacingLwWp) togglePlaceLwWp();
   if (isPlacingParametric) cancelParametricPlace();
+  if (isDrawingFlaeche) flaecheCancel();
   if (isDrawingStrasse) strasseCancel();
   if (isDrawingBemasssung) cancelBemassungDraw();
+  if (isPlacingBeschriftung) cancelBeschriftungPlace();
 }
 
 function toggleOverlayPanel() {
@@ -4276,6 +4361,8 @@ function exportJSON(){
     lwWp: lwWp ? { lat: lwWp.lat, lng: lwWp.lng, leistungKw: lwWp.leistungKw, lwaDb: lwWp.lwaDb, visible: lwWpVisible } : null,
     strassen:    strassen.map(s => ({ id: s.id, name: s.name, typ: s.typ, breite: s.breite, punkte: s.punkte })),
     bemassungen: bemassungen.map(b => ({ id: b.id, p1: b.p1, p2: b.p2 })),
+    flaechen:    flaechen.map(f => ({ id: f.id, name: f.name, typ: f.typ, punkte: f.punkte })),
+    beschriftungen: beschriftungen.map(b => ({ id: b.id, text: b.text, lat: b.lat, lng: b.lng, size: b.size, color: b.color })),
     raumprogramm: raumprogramm.map(r => ({ ...r, _layers: undefined })),
     electrical: (typeof elToJSON === 'function') ? elToJSON() : null,
   };
@@ -4872,9 +4959,11 @@ function importJSON(event) {
       // Elektro-Daten laden
       if (typeof elFromJSON === 'function') elFromJSON(project.electrical || null);
 
-      // Straßen / Bemaßungen / Raumprogramm laden
-      if (project.strassen    && project.strassen.length)    strassenRestoreFromJSON(project.strassen);
-      if (project.bemassungen && project.bemassungen.length) bemassungenRestoreFromJSON(project.bemassungen);
+      // Straßen / Bemaßungen / Flächen / Labels / Raumprogramm laden
+      if (project.strassen      && project.strassen.length)      strassenRestoreFromJSON(project.strassen);
+      if (project.bemassungen   && project.bemassungen.length)   bemassungenRestoreFromJSON(project.bemassungen);
+      if (project.flaechen      && project.flaechen.length)      flaechenRestoreFromJSON(project.flaechen);
+      if (project.beschriftungen && project.beschriftungen.length) beschriftungenRestoreFromJSON(project.beschriftungen);
       if (project.raumprogramm && project.raumprogramm.length) {
         raumprogramm = project.raumprogramm.map(r => ({ ...r, _layers: undefined }));
         raumprogrammIdCounter = Math.max(...raumprogramm.map(r => r.id), 0) + 1;
@@ -5172,6 +5261,8 @@ function autosave() {
       lwWp: lwWp ? { lat: lwWp.lat, lng: lwWp.lng, leistungKw: lwWp.leistungKw, lwaDb: lwWp.lwaDb, visible: lwWpVisible } : null,
       strassen:     strassen.map(s => ({ id: s.id, name: s.name, typ: s.typ, breite: s.breite, punkte: s.punkte })),
       bemassungen:  bemassungen.map(b => ({ id: b.id, p1: b.p1, p2: b.p2 })),
+      flaechen:     flaechen.map(f => ({ id: f.id, name: f.name, typ: f.typ, punkte: f.punkte })),
+      beschriftungen: beschriftungen.map(b => ({ id: b.id, text: b.text, lat: b.lat, lng: b.lng, size: b.size, color: b.color })),
       raumprogramm: raumprogramm.map(r => ({ id: r.id, name: r.name, breite: r.breite, laenge: r.laenge, stockwerke: r.stockwerke, drehung: r.drehung, nutzung: r.nutzung, baujahr: r.baujahr, waerme: r.waerme, heizlast: r.heizlast, placed: r.placed }))
     };
     localStorage.setItem('energiekarte_autosave', JSON.stringify(project));
@@ -5238,8 +5329,10 @@ function loadAutosave() {
       updateLwWpDisplay();
       updateLwWpVisibility();
     }
-    if (project.strassen    && project.strassen.length)    strassenRestoreFromJSON(project.strassen);
-    if (project.bemassungen && project.bemassungen.length) bemassungenRestoreFromJSON(project.bemassungen);
+    if (project.strassen      && project.strassen.length)      strassenRestoreFromJSON(project.strassen);
+    if (project.bemassungen   && project.bemassungen.length)   bemassungenRestoreFromJSON(project.bemassungen);
+    if (project.flaechen      && project.flaechen.length)      flaechenRestoreFromJSON(project.flaechen);
+    if (project.beschriftungen && project.beschriftungen.length) beschriftungenRestoreFromJSON(project.beschriftungen);
     if (project.raumprogramm && project.raumprogramm.length) {
       raumprogramm = project.raumprogramm.map(r => ({ ...r }));
       raumprogrammIdCounter = Math.max(...raumprogramm.map(r => r.id), 0) + 1;
@@ -16451,6 +16544,234 @@ function elInit() {
   setTimeout(()=>renderCtrlStrip(), 100);
 }
 
+// ── Flächen-Layer ─────────────────────────────────────────────────────────
+
+function toggleFlaechenPanel() {
+  const p = document.getElementById('flaechen-panel');
+  const btn = document.getElementById('btn-flaechen-toggle');
+  const isVis = p.classList.contains('visible');
+  hidePanels();
+  if (!isVis) { p.classList.add('visible'); btn.classList.add('active'); renderFlaechenList(); }
+  else { if (isDrawingFlaeche) flaecheCancel(); }
+}
+
+function toggleFlaecheDrawMode() {
+  if (isDrawingFlaeche) { flaecheCancel(); return; }
+  isDrawingFlaeche = true;
+  flaecheDrawPunkte = [];
+  const btn = document.getElementById('btn-flaeche-draw');
+  if (btn) { btn.classList.add('active'); btn.querySelector('.t-icon').textContent = '⬛'; }
+  map.getContainer().style.cursor = 'crosshair';
+  map.doubleClickZoom.disable();
+  showHint('Punkte klicken. Ersten Punkt nochmals anklicken oder Doppelklick zum Abschließen. [Esc] abbrechen.');
+}
+
+function flaecheRedrawPreview() {
+  if (flaecheDrawPolyline) map.removeLayer(flaecheDrawPolyline);
+  if (flaecheDrawPunkte.length < 2) return;
+  flaecheDrawPolyline = L.polyline(flaecheDrawPunkte, {
+    color: '#81c784', weight: 2, dashArray: '5 4', opacity: 0.9, interactive: false
+  }).addTo(map);
+}
+
+function flaecheFinish() {
+  if (flaecheDrawPunkte.length < 3) { flaecheCancel(); return; }
+  const typ  = document.getElementById('flaeche-typ-select').value;
+  const name = document.getElementById('flaeche-name').value.trim() || (FLAECHEN_TYPEN[typ]?.label || 'Fläche');
+  const f = { id: flaecheIdCounter++, name, typ, punkte: [...flaecheDrawPunkte], _layer: null };
+  flaechen.push(f);
+  renderFlaecheOnMap(f);
+  flaecheCancel();
+  renderFlaechenList();
+  document.getElementById('flaeche-name').value = '';
+}
+
+function flaecheCancel() {
+  isDrawingFlaeche = false;
+  flaecheDrawPunkte = [];
+  if (flaecheDrawPolyline) { map.removeLayer(flaecheDrawPolyline); flaecheDrawPolyline = null; }
+  if (flaecheStartMarker)  { map.removeLayer(flaecheStartMarker);  flaecheStartMarker = null; }
+  const btn = document.getElementById('btn-flaeche-draw');
+  if (btn) { btn.classList.remove('active'); btn.querySelector('.t-icon').textContent = '✏'; }
+  map.getContainer().style.cursor = '';
+  map.doubleClickZoom.enable();
+  hideHint();
+}
+
+function renderFlaecheOnMap(f) {
+  if (f._layer) flaechenLayerGroup.removeLayer(f._layer);
+  const t = FLAECHEN_TYPEN[f.typ] || FLAECHEN_TYPEN.sonstiges;
+  f._layer = L.polygon(f.punkte, {
+    color: t.rand, weight: 1.5, fillColor: t.farbe, fillOpacity: t.opacity, opacity: 0.8
+  }).addTo(flaechenLayerGroup);
+  f._layer.bindTooltip(f.name, { permanent: false, direction: 'center', opacity: 0.9 });
+}
+
+function flaecheLoeschen(id) {
+  const f = flaechen.find(x => x.id === id);
+  if (f?._layer) flaechenLayerGroup.removeLayer(f._layer);
+  flaechen = flaechen.filter(x => x.id !== id);
+  renderFlaechenList();
+}
+
+function flaechenAlleLoeschen() {
+  flaechen.forEach(f => { if (f._layer) flaechenLayerGroup.removeLayer(f._layer); });
+  flaechen = [];
+  renderFlaechenList();
+}
+
+function renderFlaechenList() {
+  const el = document.getElementById('flaechen-list');
+  if (!el) return;
+  if (!flaechen.length) {
+    el.innerHTML = '<div style="font-size:10px;color:var(--muted);">Noch keine Flächen gezeichnet.</div>';
+    return;
+  }
+  el.innerHTML = flaechen.map(f => {
+    const t = FLAECHEN_TYPEN[f.typ] || FLAECHEN_TYPEN.sonstiges;
+    const area = polygonAreaM2(f.punkte);
+    const areaLabel = area ? (area >= 10000 ? (area/10000).toLocaleString('de-DE',{maximumFractionDigits:2})+' ha' : Math.round(area)+' m²') : '';
+    return `<div class="flaeche-item">
+      <div class="flaeche-swatch" style="background:${t.farbe};border-color:${t.rand};"></div>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+      <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;flex-shrink:0;">${areaLabel}</span>
+      <button class="btn-xs red" onclick="flaecheLoeschen(${f.id})" style="flex-shrink:0;padding:2px 5px;">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function flaechenRestoreFromJSON(data) {
+  if (!data?.length) return;
+  flaechen = []; flaecheIdCounter = 1;
+  data.forEach(f => {
+    const obj = { id: f.id, name: f.name, typ: f.typ, punkte: f.punkte, _layer: null };
+    flaechen.push(obj);
+    renderFlaecheOnMap(obj);
+    if (f.id >= flaecheIdCounter) flaecheIdCounter = f.id + 1;
+  });
+  renderFlaechenList();
+}
+
+// ── Beschriftungen / Labels ───────────────────────────────────────────────
+
+function toggleBeschriftungenPanel() {
+  const p = document.getElementById('beschriftungen-panel');
+  const btn = document.getElementById('btn-besch-toggle');
+  const isVis = p.classList.contains('visible');
+  hidePanels();
+  if (!isVis) { p.classList.add('visible'); btn.classList.add('active'); renderBeschriftungenList(); }
+  else { if (isPlacingBeschriftung) cancelBeschriftungPlace(); }
+}
+
+function startBeschriftungPlace() {
+  const text = (document.getElementById('besch-text').value || '').trim();
+  if (!text) { showHint('Bitte zuerst einen Text eingeben.'); return; }
+  isPlacingBeschriftung = true;
+  document.getElementById('btn-besch-place').classList.add('active');
+  map.getContainer().style.cursor = 'crosshair';
+  showHint(`"${text}" – Auf Karte klicken. [Esc] abbrechen.`);
+}
+
+function cancelBeschriftungPlace() {
+  isPlacingBeschriftung = false;
+  const btn = document.getElementById('btn-besch-place');
+  if (btn) btn.classList.remove('active');
+  map.getContainer().style.cursor = '';
+  hideHint();
+}
+
+function renderBeschriftungOnMap(b) {
+  if (b._layer) beschriftungenLayerGroup.removeLayer(b._layer);
+  const icon = L.divIcon({
+    className: '',
+    html: `<div class="beschriftung-marker" style="font-size:${b.size}px;color:${b.color};">${escHtml(b.text)}</div>`,
+    iconAnchor: [0, b.size / 2]
+  });
+  b._layer = L.marker([b.lat, b.lng], { icon, draggable: true, zIndexOffset: 700 })
+    .addTo(beschriftungenLayerGroup);
+  b._layer.on('dragend', e => { b.lat = e.target.getLatLng().lat; b.lng = e.target.getLatLng().lng; });
+  b._layer.on('click', () => beschriftungEditPopup(b));
+}
+
+function beschriftungEditPopup(b) {
+  L.popup({ closeButton: true, minWidth: 230 })
+    .setLatLng([b.lat, b.lng])
+    .setContent(`
+      <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:#e8eaf0;background:#1f2435;padding:8px;border-radius:6px;">
+        <div style="margin-bottom:6px;font-size:10px;color:#7a8099;text-transform:uppercase;letter-spacing:.05em;">Label bearbeiten</div>
+        <input id="popup-besch-text-${b.id}" type="text" value="${escHtml(b.text)}"
+          style="width:100%;background:#0f1117;border:1px solid #2a3050;border-radius:4px;color:#e8eaf0;font-family:inherit;font-size:12px;padding:4px 6px;margin-bottom:6px;box-sizing:border-box;"/>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+          <input id="popup-besch-size-${b.id}" type="number" min="8" max="64" value="${b.size}"
+            style="width:58px;background:#0f1117;border:1px solid #2a3050;border-radius:4px;color:#e8eaf0;font-family:monospace;font-size:11px;padding:3px 5px;"/>
+          <span style="font-size:10px;color:#7a8099;">px</span>
+          <input id="popup-besch-color-${b.id}" type="color" value="${b.color}"
+            style="width:36px;height:26px;border:1px solid #2a3050;border-radius:4px;padding:1px;cursor:pointer;background:transparent;"/>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button onclick="beschriftungUpdate(${b.id})"
+            style="flex:1;padding:4px;border-radius:4px;border:1px solid #4caf50;background:transparent;color:#4caf50;font-family:inherit;font-size:11px;cursor:pointer;">✓ OK</button>
+          <button onclick="beschriftungLoeschen(${b.id})"
+            style="padding:4px 8px;border-radius:4px;border:1px solid #e53935;background:transparent;color:#e53935;font-family:inherit;font-size:11px;cursor:pointer;">✕</button>
+        </div>
+      </div>`)
+    .openOn(map);
+}
+
+function beschriftungUpdate(id) {
+  const b = beschriftungen.find(x => x.id === id);
+  if (!b) return;
+  b.text  = document.getElementById(`popup-besch-text-${id}`)?.value  || b.text;
+  b.size  = parseInt(document.getElementById(`popup-besch-size-${id}`)?.value) || b.size;
+  b.color = document.getElementById(`popup-besch-color-${id}`)?.value || b.color;
+  map.closePopup();
+  renderBeschriftungOnMap(b);
+  renderBeschriftungenList();
+}
+
+function beschriftungLoeschen(id) {
+  map.closePopup();
+  const b = beschriftungen.find(x => x.id === id);
+  if (b?._layer) beschriftungenLayerGroup.removeLayer(b._layer);
+  beschriftungen = beschriftungen.filter(x => x.id !== id);
+  renderBeschriftungenList();
+}
+
+function beschriftungenAlleLoeschen() {
+  beschriftungen.forEach(b => { if (b._layer) beschriftungenLayerGroup.removeLayer(b._layer); });
+  beschriftungen = [];
+  renderBeschriftungenList();
+}
+
+function renderBeschriftungenList() {
+  const el = document.getElementById('beschriftungen-list');
+  if (!el) return;
+  if (!beschriftungen.length) {
+    el.innerHTML = '<div style="font-size:10px;color:var(--muted);">Noch keine Labels gesetzt.</div>';
+    return;
+  }
+  el.innerHTML = beschriftungen.map(b => `
+    <div class="besch-item">
+      <span style="font-size:${Math.min(b.size,13)}px;color:${b.color};flex-shrink:0;text-shadow:0 1px 2px rgba(0,0,0,.7);">${escHtml(b.text)}</span>
+      <span style="flex:1;"></span>
+      <button class="btn-xs" onclick="(() => { const x=beschriftungen.find(b=>b.id===${b.id}); if(x){beschriftungEditPopup(x);map.panTo([x.lat,x.lng]);} })()"
+        style="flex-shrink:0;padding:2px 5px;border-color:#ce93d8;color:#ce93d8;">✎</button>
+      <button class="btn-xs red" onclick="beschriftungLoeschen(${b.id})" style="flex-shrink:0;padding:2px 5px;">✕</button>
+    </div>`).join('');
+}
+
+function beschriftungenRestoreFromJSON(data) {
+  if (!data?.length) return;
+  beschriftungen = []; beschriftungIdCounter = 1;
+  data.forEach(b => {
+    const obj = { id: b.id, text: b.text, lat: b.lat, lng: b.lng, size: b.size || 14, color: b.color || '#ffffff', _layer: null };
+    beschriftungen.push(obj);
+    renderBeschriftungOnMap(obj);
+    if (b.id >= beschriftungIdCounter) beschriftungIdCounter = b.id + 1;
+  });
+  renderBeschriftungenList();
+}
+
 // ── Raumprogramm (Excel-Import) ───────────────────────────────────────────
 
 function rpImportExcel(event) {
@@ -16971,6 +17292,74 @@ elInit();   // Elektro-Modul starten (nach map-Init, einmalig)
     Klicken = Punkt setzen &nbsp;·&nbsp; Doppelklick / Rechtsklick = Fertig
   </div>
   <div id="strassen-list" class="strassen-list"></div>
+</div>
+
+<!-- ── Flächen-Layer ─────────────────────────────────────────────────────── -->
+<div class="float-panel" id="flaechen-panel" style="border:1px solid #388e3c;min-width:300px;">
+  <div class="panel-drag-handle" onmousedown="startDrag(event,'flaechen-panel')">
+    <span style="color:#81c784;font-size:12px">⬛ Flächen &amp; Freiflächen</span>
+    <span class="drag-dots">⠿</span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+    <div class="inp-group">
+      <div class="inp-label">Typ</div>
+      <select class="inp-field" id="flaeche-typ-select">
+        <option value="gruen">Grünfläche</option>
+        <option value="parkplatz">Parkplatz</option>
+        <option value="innenhof">Innenhof</option>
+        <option value="wasser">Wasserfläche</option>
+        <option value="sonstiges">Sonstiges</option>
+      </select>
+    </div>
+    <div class="inp-group" style="grid-column:1/-1;">
+      <div class="inp-label">Name (optional)</div>
+      <input class="inp-field" id="flaeche-name" type="text" placeholder="z.B. Spielplatz, Stellplatz…"/>
+    </div>
+  </div>
+  <div class="panel-btns" style="margin-bottom:8px;">
+    <button class="tool-btn" id="btn-flaeche-draw" onclick="toggleFlaecheDrawMode()"
+      style="border-color:#388e3c;color:#81c784;">
+      <span class="t-icon">✏</span> Fläche zeichnen
+    </button>
+    <button class="btn-secondary" onclick="flaechenAlleLoeschen()">Alle löschen</button>
+  </div>
+  <div style="font-size:9px;color:var(--muted);margin-bottom:6px;">
+    Klicken = Punkt setzen &nbsp;·&nbsp; Ersten Punkt nochmals klicken oder Doppelklick = Fertig
+  </div>
+  <div id="flaechen-list" class="flaechen-list"></div>
+</div>
+
+<!-- ── Beschriftungen / Labels ───────────────────────────────────────────── -->
+<div class="float-panel" id="beschriftungen-panel" style="border:1px solid #ce93d8;min-width:300px;">
+  <div class="panel-drag-handle" onmousedown="startDrag(event,'beschriftungen-panel')">
+    <span style="color:#ce93d8;font-size:12px">🏷 Beschriftungen &amp; Labels</span>
+    <span class="drag-dots">⠿</span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+    <div class="inp-group" style="grid-column:1/-1;">
+      <div class="inp-label">Text</div>
+      <input class="inp-field" id="besch-text" type="text" placeholder="z.B. Wohngebäude A, Einfahrt…"/>
+    </div>
+    <div class="inp-group">
+      <div class="inp-label">Schriftgröße px</div>
+      <input class="inp-field" id="besch-size" type="number" min="8" max="64" value="14"/>
+    </div>
+    <div class="inp-group">
+      <div class="inp-label">Farbe</div>
+      <input class="inp-field" id="besch-color" type="color" value="#ffffff" style="padding:2px 4px;height:30px;cursor:pointer;"/>
+    </div>
+  </div>
+  <div class="panel-btns" style="margin-bottom:8px;">
+    <button class="tool-btn" id="btn-besch-place" onclick="startBeschriftungPlace()"
+      style="border-color:#ce93d8;color:#ce93d8;">
+      <span class="t-icon">+</span> Auf Karte setzen
+    </button>
+    <button class="btn-secondary" onclick="beschriftungenAlleLoeschen()">Alle löschen</button>
+  </div>
+  <div style="font-size:9px;color:var(--muted);margin-bottom:6px;">
+    Klick auf Label = bearbeiten &nbsp;·&nbsp; Verschieben per Drag
+  </div>
+  <div id="beschriftungen-list" class="beschriftungen-list"></div>
 </div>
 
 <!-- ── Gebäudehülle-Beurteilung ──────────────────────────────────────── -->
