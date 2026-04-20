@@ -416,6 +416,19 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
 .ansicht-row label{font-size:11px;color:var(--text);cursor:pointer;flex:1;}
 .ansicht-row input[type=checkbox]{accent-color:var(--accent);cursor:pointer;width:13px;height:13px;}
 
+/* ── Parametrische Platzierung + Straßen ───────────────────────────────── */
+.strassen-list{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;margin-top:8px;}
+.strassen-list::-webkit-scrollbar{width:3px;}
+.strassen-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.strasse-item{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:5px 8px;font-size:11px;}
+.strasse-dot{width:24px;height:6px;border-radius:3px;flex-shrink:0;}
+.strasse-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.strasse-badge{font-size:9px;padding:1px 5px;border-radius:5px;background:var(--border);color:var(--muted);}
+.param-area-display{background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--accent);font-family:'DM Mono',monospace;font-size:11px;padding:4px 6px;width:100%;text-align:right;}
+.param-rotation-btns{display:flex;gap:3px;margin-top:4px;}
+.param-rotation-btns button{flex:1;padding:2px 4px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:10px;cursor:pointer;font-family:inherit;transition:.12s;}
+.param-rotation-btns button:hover{border-color:var(--accent);color:var(--accent);}
+
 /* ── Gebäudehülle-Modul ─────────────────────────────────────────────── */
 .huelle-section{margin-bottom:12px;}
 .huelle-section-title{font-size:9px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;}
@@ -491,6 +504,12 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
     </button>
     <button class="tool-btn green" id="osm-btn" onclick="showOsmPanel()">
       <span class="t-icon">↓</span><div class="spinner"></div> OSM
+    </button>
+    <button class="tool-btn green" id="btn-parametric-toggle" onclick="toggleParametricPanel()" title="Gebäude parametrisch platzieren">
+      <span class="t-icon">📐</span> Platzieren
+    </button>
+    <button class="tool-btn" id="btn-strassen-toggle" onclick="toggleStrassenPanel()" title="Straßen zeichnen" style="border-color:#607d8b;color:#90a4ae;">
+      <span class="t-icon">🛣</span> Straßen
     </button>
     <button class="tool-btn" id="btn-tile" onclick="toggleTile()" style="border-color:#607d8b;color:#90a4ae;">🛰</button>
   </div>
@@ -1248,6 +1267,27 @@ let lwWpLayerGroup = null;
 let lwWpVisible = true;
 let isPlacingLwWp = false;
 
+// ── Parametrische Gebäudeplatzierung ─────────────────────────────────────
+let isPlacingParametric = false;
+let parametricWidth = 20;
+let parametricLength = 15;
+let parametricRotation = 0;
+let parametricPreviewLayer = null;
+
+// ── Straßen-Layer ─────────────────────────────────────────────────────────
+let strassen = [];
+let strasseIdCounter = 1;
+let isDrawingStrasse = false;
+let strasseDrawPunkte = [];
+let strasseDrawPolyline = null;
+let strasseDrawPreviewMarker = null;
+let strassenLayerGroup = null;
+const STRASSEN_TYPEN = {
+  hauptstrasse:  { label: 'Hauptstraße',          breite: 8, farbe: '#546e7a', rand: '#263238' },
+  erschliessung: { label: 'Erschließungsstraße',   breite: 6, farbe: '#607d8b', rand: '#37474f' },
+  fussweg:       { label: 'Fuß-/Radweg',           breite: 2, farbe: '#8d6e63', rand: '#5d4037' },
+};
+
 let overlayLayer = null;
 let overlayMarkerNW = null;
 let overlayMarkerSE = null;
@@ -1424,6 +1464,7 @@ const esriTile = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/servic
 osmTile.addTo(map);
 fliessgewaesserLayerGroup = L.layerGroup();
 lwWpLayerGroup = L.layerGroup();
+strassenLayerGroup = L.layerGroup().addTo(map);
 let currentTile = 'osm';
 function toggleTile(){
   if(currentTile==='osm'){ map.removeLayer(osmTile); esriTile.addTo(map); currentTile='esri'; document.getElementById('btn-tile').textContent='🗺 OSM'; }
@@ -2498,6 +2539,17 @@ function finishAreaDraw() {
 }
 
 map.on('click',e=>{
+  if (isPlacingParametric) {
+    const pts = calcRectanglePolygon(e.latlng.lat, e.latlng.lng, parametricWidth, parametricLength, parametricRotation);
+    addGebaeude({ coords: pts });
+    cancelParametricPlace();
+    return;
+  }
+  if (isDrawingStrasse) {
+    strasseDrawPunkte.push({lat: e.latlng.lat, lng: e.latlng.lng});
+    strasseRedrawPreview();
+    return;
+  }
   if (isPlacingLwWp) {
     placeLwWpAt(e.latlng);
     return;
@@ -2529,6 +2581,11 @@ map.on('click',e=>{
 });
 
 map.on('contextmenu', e => {
+  if(isDrawingStrasse) {
+    if (strasseDrawPunkte.length >= 2) strasseFinish();
+    else strasseCancel();
+    return;
+  }
   if(isDrawingRiver && riverPoints.length > 0){
     riverPoints.pop();
     redrawRiverDuringDraw();
@@ -2549,8 +2606,20 @@ map.on('contextmenu', e => {
 map.on('dblclick',e=>{
   L.DomEvent.stopPropagation(e);
   L.DomEvent.preventDefault(e);
+  if(isDrawingStrasse && strasseDrawPunkte.length >= 2) { strasseFinish(); return; }
   if(isDrawingRiver && riverPoints.length >= 2) { finishDrawRiver(); return; }
   if(isDrawingTrasse) { toggleDrawTrasse(); }
+});
+
+map.on('mousemove', e => {
+  if (isPlacingParametric) {
+    if (parametricPreviewLayer) map.removeLayer(parametricPreviewLayer);
+    const pts = calcRectanglePolygon(e.latlng.lat, e.latlng.lng, parametricWidth, parametricLength, parametricRotation);
+    parametricPreviewLayer = L.polygon(pts, {
+      color: '#4caf50', weight: 2, dashArray: '6 4',
+      fillColor: '#4caf50', fillOpacity: 0.1, interactive: false
+    }).addTo(map);
+  }
 });
 
 map.on('zoomend', function() {
@@ -2559,11 +2628,13 @@ map.on('zoomend', function() {
 });
 
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){ 
+  if(e.key==='Escape'){
+    if (isPlacingParametric) cancelParametricPlace();
+    if (isDrawingStrasse) strasseCancel();
     if (isPlacingLwWp) togglePlaceLwWp();
     if(isDrawingRiver) toggleDrawRiver();
     if(isDrawingTrasse) toggleDrawTrasse();
-    cancelDraw(); 
+    cancelDraw();
     if(isDrawingEdge) toggleDrawEdge(); 
   }
 });
@@ -3025,20 +3096,26 @@ function finishDraw(){
   renderList();updateViz();
 }
 
-function hidePanels(){ 
-  document.getElementById('osm-panel').classList.remove('visible'); 
+function hidePanels(){
+  document.getElementById('osm-panel').classList.remove('visible');
   document.getElementById('netz-panel').classList.remove('visible');
   document.getElementById('fliessgewaesser-panel').classList.remove('visible');
   document.getElementById('lwwp-panel').classList.remove('visible');
   document.getElementById('area-edit-panel').classList.remove('visible');
   document.getElementById('chart-panel').classList.remove('visible');
   document.getElementById('overlay-panel').classList.remove('visible');
+  document.getElementById('parametric-panel').classList.remove('visible');
+  document.getElementById('strassen-panel').classList.remove('visible');
   document.getElementById('btn-netz-toggle').classList.remove('active');
   document.getElementById('btn-fliessgewaesser-toggle').classList.remove('active');
   document.getElementById('btn-lwwp-toggle').classList.remove('active');
   document.getElementById('btn-chart-toggle').classList.remove('active');
   document.getElementById('btn-overlay-toggle').classList.remove('active');
+  document.getElementById('btn-parametric-toggle').classList.remove('active');
+  document.getElementById('btn-strassen-toggle').classList.remove('active');
   if (isPlacingLwWp) togglePlaceLwWp();
+  if (isPlacingParametric) cancelParametricPlace();
+  if (isDrawingStrasse) strasseCancel();
 }
 
 function toggleOverlayPanel() {
@@ -4129,6 +4206,7 @@ function exportJSON(){
     customEdges: netzEdges.filter(e => e.u < 10000 && e.v < 10000).map(e => ({u: e.u, v: e.v})),
     fliessgewaesser: fliessgewaesser ? { latlngs: fliessgewaesser.latlngs, durchflussLs: fliessgewaesser.durchflussLs, leistungKw: fliessgewaesser.leistungKw, jaz: fliessgewaesser.jaz, visible: fliessgewaesserVisible } : null,
     lwWp: lwWp ? { lat: lwWp.lat, lng: lwWp.lng, leistungKw: lwWp.leistungKw, lwaDb: lwWp.lwaDb, visible: lwWpVisible } : null,
+    strassen: strassen.map(s => ({ id: s.id, name: s.name, typ: s.typ, breite: s.breite, punkte: s.punkte })),
     electrical: (typeof elToJSON === 'function') ? elToJSON() : null,
   };
 
@@ -4724,6 +4802,9 @@ function importJSON(event) {
       // Elektro-Daten laden
       if (typeof elFromJSON === 'function') elFromJSON(project.electrical || null);
 
+      // Straßen laden
+      if (project.strassen && project.strassen.length) strassenRestoreFromJSON(project.strassen);
+
       renderList();
       updateViz();
       updateTotals();
@@ -5012,7 +5093,8 @@ function autosave() {
       },
       trasse: trassePoints.map(p => ({lat: p.lat, lng: p.lng})),
       fliessgewaesser: fliessgewaesser ? { latlngs: fliessgewaesser.latlngs, durchflussLs: fliessgewaesser.durchflussLs, leistungKw: fliessgewaesser.leistungKw, jaz: fliessgewaesser.jaz, visible: fliessgewaesserVisible } : null,
-      lwWp: lwWp ? { lat: lwWp.lat, lng: lwWp.lng, leistungKw: lwWp.leistungKw, lwaDb: lwWp.lwaDb, visible: lwWpVisible } : null
+      lwWp: lwWp ? { lat: lwWp.lat, lng: lwWp.lng, leistungKw: lwWp.leistungKw, lwaDb: lwWp.lwaDb, visible: lwWpVisible } : null,
+      strassen: strassen.map(s => ({ id: s.id, name: s.name, typ: s.typ, breite: s.breite, punkte: s.punkte }))
     };
     localStorage.setItem('energiekarte_autosave', JSON.stringify(project));
   } catch(e) {}
@@ -5078,6 +5160,7 @@ function loadAutosave() {
       updateLwWpDisplay();
       updateLwWpVisibility();
     }
+    if (project.strassen && project.strassen.length) strassenRestoreFromJSON(project.strassen);
     renderList(); updateViz(); updateTotals();
     showHint('✓ Autosave wiederhergestellt.');
     setTimeout(hideHint, 3000);
@@ -16284,10 +16367,278 @@ function elInit() {
   setTimeout(()=>renderCtrlStrip(), 100);
 }
 
+// ── Parametrische Gebäudeplatzierung ─────────────────────────────────────
+
+function calcRectanglePolygon(lat, lng, widthM, lengthM, rotDeg) {
+  const R = 6371000;
+  const latRad = lat * Math.PI / 180;
+  const θ = rotDeg * Math.PI / 180;
+  const hw = widthM / 2, hl = lengthM / 2;
+  // Corners in local coords (x=East, y=North), then rotate clockwise by θ
+  const raw = [[-hw, hl], [hw, hl], [hw, -hl], [-hw, -hl]];
+  return raw.map(([x, y]) => {
+    const rx = x * Math.cos(θ) + y * Math.sin(θ);
+    const ry = -x * Math.sin(θ) + y * Math.cos(θ);
+    return {
+      lat: lat + (ry / R) * (180 / Math.PI),
+      lng: lng + (rx / R) * (180 / Math.PI) / Math.cos(latRad)
+    };
+  });
+}
+
+function toggleParametricPanel() {
+  const p = document.getElementById('parametric-panel');
+  const btn = document.getElementById('btn-parametric-toggle');
+  const isVis = p.classList.contains('visible');
+  hidePanels();
+  if (!isVis) {
+    p.classList.add('visible');
+    btn.classList.add('active');
+    document.getElementById('param-area-disp').textContent =
+      Math.round(parametricWidth * parametricLength) + ' m²';
+  } else {
+    cancelParametricPlace();
+    btn.classList.remove('active');
+  }
+}
+
+function startParametricPlace() {
+  isPlacingParametric = true;
+  parametricWidth  = parseFloat(document.getElementById('param-width').value)  || 20;
+  parametricLength = parseFloat(document.getElementById('param-length').value) || 15;
+  parametricRotation = parseFloat(document.getElementById('param-rotation').value) || 0;
+  document.getElementById('btn-parametric-place').classList.add('active');
+  map.getContainer().style.cursor = 'crosshair';
+  map.doubleClickZoom.disable();
+  showHint('Klicke auf die Karte, um das Gebäude zu platzieren. [Esc] zum Abbrechen.');
+}
+
+function cancelParametricPlace() {
+  if (!isPlacingParametric) return;
+  isPlacingParametric = false;
+  const btn = document.getElementById('btn-parametric-place');
+  if (btn) btn.classList.remove('active');
+  if (parametricPreviewLayer) { map.removeLayer(parametricPreviewLayer); parametricPreviewLayer = null; }
+  map.getContainer().style.cursor = '';
+  map.doubleClickZoom.enable();
+  hideHint();
+}
+
+// ── Straßen-Layer ─────────────────────────────────────────────────────────
+
+function toggleStrassenPanel() {
+  const p = document.getElementById('strassen-panel');
+  const btn = document.getElementById('btn-strassen-toggle');
+  const isVis = p.classList.contains('visible');
+  hidePanels();
+  if (!isVis) {
+    p.classList.add('visible');
+    btn.classList.add('active');
+    renderStrassenList();
+  } else {
+    btn.classList.remove('active');
+    if (isDrawingStrasse) strasseCancel();
+  }
+}
+
+function strasseUpdateBreite(typ) {
+  const t = STRASSEN_TYPEN[typ];
+  if (t) document.getElementById('strasse-breite').value = t.breite;
+}
+
+function toggleStrasseDrawMode() {
+  if (isDrawingStrasse) {
+    strasseCancel();
+  } else {
+    isDrawingStrasse = true;
+    strasseDrawPunkte = [];
+    const btn = document.getElementById('btn-strasse-draw');
+    if (btn) { btn.classList.add('active'); btn.querySelector('.t-icon').textContent = '⬛'; }
+    map.getContainer().style.cursor = 'crosshair';
+    map.doubleClickZoom.disable();
+    showHint('Klicke Punkte für die Straße. Doppelklick oder Rechtsklick zum Abschließen. [Esc] abbrechen.');
+  }
+}
+
+function strasseRedrawPreview() {
+  if (strasseDrawPolyline) map.removeLayer(strasseDrawPolyline);
+  if (strasseDrawPunkte.length < 2) return;
+  strasseDrawPolyline = L.polyline(strasseDrawPunkte, {
+    color: '#90a4ae', weight: 3, dashArray: '6 4', opacity: 0.8, interactive: false
+  }).addTo(map);
+}
+
+function strasseFinish() {
+  if (strasseDrawPunkte.length < 2) { strasseCancel(); return; }
+  const typ  = document.getElementById('strasse-typ-select').value;
+  const name = document.getElementById('strasse-name').value.trim() ||
+               (STRASSEN_TYPEN[typ]?.label || 'Straße');
+  const breite = parseFloat(document.getElementById('strasse-breite').value) ||
+                 STRASSEN_TYPEN[typ]?.breite || 6;
+  const s = { id: strasseIdCounter++, name, typ, breite, punkte: [...strasseDrawPunkte], _layers: null };
+  strassen.push(s);
+  renderStrasseOnMap(s);
+  strasseCancel();
+  renderStrassenList();
+  document.getElementById('strasse-name').value = '';
+}
+
+function strasseCancel() {
+  isDrawingStrasse = false;
+  strasseDrawPunkte = [];
+  if (strasseDrawPolyline) { map.removeLayer(strasseDrawPolyline); strasseDrawPolyline = null; }
+  const btn = document.getElementById('btn-strasse-draw');
+  if (btn) { btn.classList.remove('active'); btn.querySelector('.t-icon').textContent = '✏'; }
+  map.getContainer().style.cursor = '';
+  map.doubleClickZoom.enable();
+  hideHint();
+}
+
+function renderStrasseOnMap(s) {
+  if (s._layers) { s._layers.forEach(l => strassenLayerGroup.removeLayer(l)); }
+  const typen = STRASSEN_TYPEN[s.typ] || STRASSEN_TYPEN.erschliessung;
+  const w = Math.max(2, s.breite);
+  const outer = L.polyline(s.punkte, {
+    color: typen.rand, weight: w * 2 + 3, opacity: 0.85,
+    lineCap: 'round', lineJoin: 'round', interactive: false
+  });
+  const inner = L.polyline(s.punkte, {
+    color: typen.farbe, weight: w * 2, opacity: 0.9,
+    lineCap: 'round', lineJoin: 'round', interactive: false
+  });
+  outer.addTo(strassenLayerGroup);
+  inner.addTo(strassenLayerGroup);
+  s._layers = [outer, inner];
+}
+
+function strasseLoeschen(id) {
+  const s = strassen.find(x => x.id === id);
+  if (s?._layers) s._layers.forEach(l => strassenLayerGroup.removeLayer(l));
+  strassen = strassen.filter(x => x.id !== id);
+  renderStrassenList();
+}
+
+function strassenAlleLoeschen() {
+  strassen.forEach(s => { if (s._layers) s._layers.forEach(l => strassenLayerGroup.removeLayer(l)); });
+  strassen = [];
+  renderStrassenList();
+}
+
+function renderStrassenList() {
+  const el = document.getElementById('strassen-list');
+  if (!el) return;
+  if (!strassen.length) {
+    el.innerHTML = '<div style="font-size:10px;color:var(--muted);padding:4px 0;">Noch keine Straßen gezeichnet.</div>';
+    return;
+  }
+  el.innerHTML = strassen.map(s => {
+    const typen = STRASSEN_TYPEN[s.typ] || STRASSEN_TYPEN.erschliessung;
+    return `<div class="strasse-item">
+      <div class="strasse-dot" style="background:${typen.farbe};border:1px solid ${typen.rand};"></div>
+      <span class="strasse-name">${escHtml(s.name)}</span>
+      <span class="strasse-badge">${s.breite} m</span>
+      <button class="btn-xs red" onclick="strasseLoeschen(${s.id})" style="flex-shrink:0;padding:2px 5px;">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function strassenRestoreFromJSON(data) {
+  if (!data || !data.length) return;
+  strassen = [];
+  strasseIdCounter = 1;
+  data.forEach(s => {
+    const obj = { id: s.id, name: s.name, typ: s.typ, breite: s.breite, punkte: s.punkte, _layers: null };
+    strassen.push(obj);
+    renderStrasseOnMap(obj);
+    if (s.id >= strasseIdCounter) strasseIdCounter = s.id + 1;
+  });
+  renderStrassenList();
+}
+
+// ── Ende Straßen-Modul ────────────────────────────────────────────────────
+
 renderList();
 tryRestoreAutosave();
 elInit();   // Elektro-Modul starten (nach map-Init, einmalig)
 </script>
+<!-- ── Parametrische Gebäudeplatzierung ─────────────────────────────────── -->
+<div class="float-panel green-border" id="parametric-panel">
+  <div class="panel-drag-handle" onmousedown="startDrag(event,'parametric-panel')">
+    <span style="color:#4caf50;font-size:12px">📐 Gebäude parametrisch platzieren</span>
+    <span class="drag-dots">⠿</span>
+  </div>
+  <div class="panel-info">Maße eingeben und dann auf die Karte klicken um das Gebäude zu platzieren. Rechteck wird automatisch erzeugt.</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">
+    <div class="inp-group">
+      <div class="inp-label">Breite m (O–W)</div>
+      <input class="inp-field" id="param-width" type="number" min="1" max="999" value="20"
+        oninput="parametricWidth=parseFloat(this.value)||20; document.getElementById('param-area-disp').textContent=Math.round(parametricWidth*parametricLength)+' m²'"/>
+    </div>
+    <div class="inp-group">
+      <div class="inp-label">Länge m (N–S)</div>
+      <input class="inp-field" id="param-length" type="number" min="1" max="999" value="15"
+        oninput="parametricLength=parseFloat(this.value)||15; document.getElementById('param-area-disp').textContent=Math.round(parametricWidth*parametricLength)+' m²'"/>
+    </div>
+    <div class="inp-group">
+      <div class="inp-label">Drehung ° (Uhrzeigersinn)</div>
+      <input class="inp-field" id="param-rotation" type="number" min="0" max="359" value="0"
+        oninput="parametricRotation=parseFloat(this.value)||0"/>
+      <div class="param-rotation-btns">
+        <button onclick="document.getElementById('param-rotation').value=0; parametricRotation=0;">N–S</button>
+        <button onclick="document.getElementById('param-rotation').value=45; parametricRotation=45;">45°</button>
+        <button onclick="document.getElementById('param-rotation').value=90; parametricRotation=90;">O–W</button>
+      </div>
+    </div>
+    <div class="inp-group">
+      <div class="inp-label">Grundfläche m²</div>
+      <div class="param-area-display" id="param-area-disp">300 m²</div>
+    </div>
+  </div>
+  <div class="panel-btns">
+    <button class="tool-btn green" id="btn-parametric-place" onclick="startParametricPlace()">
+      <span class="t-icon">+</span> Auf Karte platzieren
+    </button>
+    <button class="btn-secondary" onclick="toggleParametricPanel()">Schließen</button>
+  </div>
+</div>
+
+<!-- ── Straßen-Layer ──────────────────────────────────────────────────────── -->
+<div class="float-panel" id="strassen-panel" style="border:1px solid #607d8b;min-width:300px;">
+  <div class="panel-drag-handle" onmousedown="startDrag(event,'strassen-panel')">
+    <span style="color:#90a4ae;font-size:12px">🛣 Straßen &amp; Wege</span>
+    <span class="drag-dots">⠿</span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+    <div class="inp-group">
+      <div class="inp-label">Typ</div>
+      <select class="inp-field" id="strasse-typ-select" onchange="strasseUpdateBreite(this.value)">
+        <option value="erschliessung">Erschließungsstraße</option>
+        <option value="hauptstrasse">Hauptstraße</option>
+        <option value="fussweg">Fuß-/Radweg</option>
+      </select>
+    </div>
+    <div class="inp-group">
+      <div class="inp-label">Breite m</div>
+      <input class="inp-field" id="strasse-breite" type="number" min="1" max="30" value="6"/>
+    </div>
+    <div class="inp-group" style="grid-column:1/-1;">
+      <div class="inp-label">Name (optional)</div>
+      <input class="inp-field" id="strasse-name" type="text" placeholder="z.B. Erschließungsstraße Nord"/>
+    </div>
+  </div>
+  <div class="panel-btns" style="margin-bottom:8px;">
+    <button class="tool-btn" id="btn-strasse-draw" onclick="toggleStrasseDrawMode()"
+      style="border-color:#607d8b;color:#90a4ae;">
+      <span class="t-icon">✏</span> Straße zeichnen
+    </button>
+    <button class="btn-secondary" onclick="strassenAlleLoeschen()">Alle löschen</button>
+  </div>
+  <div style="font-size:9px;color:var(--muted);margin-bottom:6px;">
+    Klicken = Punkt setzen &nbsp;·&nbsp; Doppelklick / Rechtsklick = Fertig
+  </div>
+  <div id="strassen-list" class="strassen-list"></div>
+</div>
+
 <!-- ── Gebäudehülle-Beurteilung ──────────────────────────────────────── -->
 <div class="float-panel" id="huellen-panel" style="border:1px solid #26a69a;min-width:500px;max-height:88vh;overflow:hidden;display:none;flex-direction:column;">
   <div class="panel-drag-handle" onmousedown="startDrag(event,'huellen-panel')">
