@@ -416,6 +416,22 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
 .ansicht-row label{font-size:11px;color:var(--text);cursor:pointer;flex:1;}
 .ansicht-row input[type=checkbox]{accent-color:var(--accent);cursor:pointer;width:13px;height:13px;}
 
+/* ── Raumprogramm ───────────────────────────────────────────────────────── */
+.rp-list{display:flex;flex-direction:column;gap:3px;max-height:200px;overflow-y:auto;margin-top:6px;}
+.rp-list::-webkit-scrollbar{width:3px;}
+.rp-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.rp-item{display:flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;transition:.12s;}
+.rp-item.placed{opacity:.45;}
+.rp-item-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rp-item-dims{font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;flex-shrink:0;white-space:nowrap;}
+.rp-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:var(--border);}
+.rp-dot.placed{background:#4caf50;}
+/* ── Bemaßungslinien ────────────────────────────────────────────────────── */
+.bem-label{background:rgba(249,168,37,.92);color:#111;font-family:'DM Mono',monospace;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:3px;white-space:nowrap;border:1px solid rgba(249,168,37,.4);cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+.bem-list{display:flex;flex-direction:column;gap:3px;max-height:160px;overflow-y:auto;margin-top:6px;}
+.bem-list::-webkit-scrollbar{width:3px;}
+.bem-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.bem-item{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;}
 /* ── Parametrische Platzierung + Straßen ───────────────────────────────── */
 .strassen-list{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;margin-top:8px;}
 .strassen-list::-webkit-scrollbar{width:3px;}
@@ -510,6 +526,9 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
     </button>
     <button class="tool-btn" id="btn-strassen-toggle" onclick="toggleStrassenPanel()" title="Straßen zeichnen" style="border-color:#607d8b;color:#90a4ae;">
       <span class="t-icon">🛣</span> Straßen
+    </button>
+    <button class="tool-btn amber" id="btn-bem-toggle" onclick="toggleBemPanel()" title="Bemaßungslinien messen">
+      <span class="t-icon">📏</span> Messen
     </button>
     <button class="tool-btn" id="btn-tile" onclick="toggleTile()" style="border-color:#607d8b;color:#90a4ae;">🛰</button>
   </div>
@@ -1273,6 +1292,11 @@ let parametricWidth = 20;
 let parametricLength = 15;
 let parametricRotation = 0;
 let parametricPreviewLayer = null;
+let parametricRpId = null;
+
+// ── Raumprogramm (Excel-Import) ───────────────────────────────────────────
+let raumprogramm = [];
+let raumprogrammIdCounter = 1;
 
 // ── Straßen-Layer ─────────────────────────────────────────────────────────
 let strassen = [];
@@ -1282,6 +1306,14 @@ let strasseDrawPunkte = [];
 let strasseDrawPolyline = null;
 let strasseDrawPreviewMarker = null;
 let strassenLayerGroup = null;
+// ── Bemaßungslinien ───────────────────────────────────────────────────────
+let bemassungen = [];
+let bemassungIdCounter = 1;
+let isDrawingBemasssung = false;
+let bemassungP1 = null;
+let bemassungP1Marker = null;
+let bemassungLayerGroup = null;
+
 const STRASSEN_TYPEN = {
   hauptstrasse:  { label: 'Hauptstraße',          breite: 8, farbe: '#546e7a', rand: '#263238' },
   erschliessung: { label: 'Erschließungsstraße',   breite: 6, farbe: '#607d8b', rand: '#37474f' },
@@ -1464,7 +1496,8 @@ const esriTile = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/servic
 osmTile.addTo(map);
 fliessgewaesserLayerGroup = L.layerGroup();
 lwWpLayerGroup = L.layerGroup();
-strassenLayerGroup = L.layerGroup().addTo(map);
+strassenLayerGroup  = L.layerGroup().addTo(map);
+bemassungLayerGroup = L.layerGroup().addTo(map);
 let currentTile = 'osm';
 function toggleTile(){
   if(currentTile==='osm'){ map.removeLayer(osmTile); esriTile.addTo(map); currentTile='esri'; document.getElementById('btn-tile').textContent='🗺 OSM'; }
@@ -2539,9 +2572,40 @@ function finishAreaDraw() {
 }
 
 map.on('click',e=>{
+  if (isDrawingBemasssung) {
+    if (!bemassungP1) {
+      bemassungP1 = { lat: e.latlng.lat, lng: e.latlng.lng };
+      const icon = L.divIcon({ className: 'area-start-handle', html: '', iconSize: [10, 10] });
+      bemassungP1Marker = L.marker(bemassungP1, { icon, interactive: false, zIndexOffset: 1000 }).addTo(map);
+      showHint('Zweiten Punkt anklicken …');
+    } else {
+      const p2 = { lat: e.latlng.lat, lng: e.latlng.lng };
+      const b = { id: bemassungIdCounter++, p1: bemassungP1, p2, _layers: null };
+      bemassungen.push(b);
+      renderBemassungOnMap(b);
+      if (bemassungP1Marker) { map.removeLayer(bemassungP1Marker); bemassungP1Marker = null; }
+      bemassungP1 = null;
+      renderBemassungenList();
+      showHint('Ersten Punkt anklicken … [Esc] zum Beenden');
+    }
+    return;
+  }
   if (isPlacingParametric) {
     const pts = calcRectanglePolygon(e.latlng.lat, e.latlng.lng, parametricWidth, parametricLength, parametricRotation);
-    addGebaeude({ coords: pts });
+    let rpEntry = parametricRpId !== null ? raumprogramm.find(x => x.id === parametricRpId) : null;
+    const opts = { coords: pts };
+    if (rpEntry) { opts.name = rpEntry.name; opts.stockwerke = rpEntry.stockwerke; opts.baujahr = rpEntry.baujahr; }
+    const newG = addGebaeude(opts);
+    if (rpEntry) {
+      newG.nutzung = rpEntry.nutzung || '';
+      if (rpEntry.waerme)    newG.waerme   = rpEntry.waerme;
+      if (rpEntry.heizlast)  newG.heizlast = rpEntry.heizlast;
+      if (!newG.waerme && newG.baujahr) calcAutoEnergy(newG);
+      rpEntry.placed = true;
+      parametricRpId = null;
+      renderRaumprogrammList();
+      renderList();
+    }
     cancelParametricPlace();
     return;
   }
@@ -2631,6 +2695,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
     if (isPlacingParametric) cancelParametricPlace();
     if (isDrawingStrasse) strasseCancel();
+    if (isDrawingBemasssung) cancelBemassungDraw();
     if (isPlacingLwWp) togglePlaceLwWp();
     if(isDrawingRiver) toggleDrawRiver();
     if(isDrawingTrasse) toggleDrawTrasse();
@@ -3106,6 +3171,7 @@ function hidePanels(){
   document.getElementById('overlay-panel').classList.remove('visible');
   document.getElementById('parametric-panel').classList.remove('visible');
   document.getElementById('strassen-panel').classList.remove('visible');
+  document.getElementById('bem-panel').classList.remove('visible');
   document.getElementById('btn-netz-toggle').classList.remove('active');
   document.getElementById('btn-fliessgewaesser-toggle').classList.remove('active');
   document.getElementById('btn-lwwp-toggle').classList.remove('active');
@@ -3113,9 +3179,11 @@ function hidePanels(){
   document.getElementById('btn-overlay-toggle').classList.remove('active');
   document.getElementById('btn-parametric-toggle').classList.remove('active');
   document.getElementById('btn-strassen-toggle').classList.remove('active');
+  document.getElementById('btn-bem-toggle').classList.remove('active');
   if (isPlacingLwWp) togglePlaceLwWp();
   if (isPlacingParametric) cancelParametricPlace();
   if (isDrawingStrasse) strasseCancel();
+  if (isDrawingBemasssung) cancelBemassungDraw();
 }
 
 function toggleOverlayPanel() {
@@ -4206,7 +4274,9 @@ function exportJSON(){
     customEdges: netzEdges.filter(e => e.u < 10000 && e.v < 10000).map(e => ({u: e.u, v: e.v})),
     fliessgewaesser: fliessgewaesser ? { latlngs: fliessgewaesser.latlngs, durchflussLs: fliessgewaesser.durchflussLs, leistungKw: fliessgewaesser.leistungKw, jaz: fliessgewaesser.jaz, visible: fliessgewaesserVisible } : null,
     lwWp: lwWp ? { lat: lwWp.lat, lng: lwWp.lng, leistungKw: lwWp.leistungKw, lwaDb: lwWp.lwaDb, visible: lwWpVisible } : null,
-    strassen: strassen.map(s => ({ id: s.id, name: s.name, typ: s.typ, breite: s.breite, punkte: s.punkte })),
+    strassen:    strassen.map(s => ({ id: s.id, name: s.name, typ: s.typ, breite: s.breite, punkte: s.punkte })),
+    bemassungen: bemassungen.map(b => ({ id: b.id, p1: b.p1, p2: b.p2 })),
+    raumprogramm: raumprogramm.map(r => ({ ...r, _layers: undefined })),
     electrical: (typeof elToJSON === 'function') ? elToJSON() : null,
   };
 
@@ -4802,8 +4872,14 @@ function importJSON(event) {
       // Elektro-Daten laden
       if (typeof elFromJSON === 'function') elFromJSON(project.electrical || null);
 
-      // Straßen laden
-      if (project.strassen && project.strassen.length) strassenRestoreFromJSON(project.strassen);
+      // Straßen / Bemaßungen / Raumprogramm laden
+      if (project.strassen    && project.strassen.length)    strassenRestoreFromJSON(project.strassen);
+      if (project.bemassungen && project.bemassungen.length) bemassungenRestoreFromJSON(project.bemassungen);
+      if (project.raumprogramm && project.raumprogramm.length) {
+        raumprogramm = project.raumprogramm.map(r => ({ ...r, _layers: undefined }));
+        raumprogrammIdCounter = Math.max(...raumprogramm.map(r => r.id), 0) + 1;
+        renderRaumprogrammList();
+      }
 
       renderList();
       updateViz();
@@ -5094,7 +5170,9 @@ function autosave() {
       trasse: trassePoints.map(p => ({lat: p.lat, lng: p.lng})),
       fliessgewaesser: fliessgewaesser ? { latlngs: fliessgewaesser.latlngs, durchflussLs: fliessgewaesser.durchflussLs, leistungKw: fliessgewaesser.leistungKw, jaz: fliessgewaesser.jaz, visible: fliessgewaesserVisible } : null,
       lwWp: lwWp ? { lat: lwWp.lat, lng: lwWp.lng, leistungKw: lwWp.leistungKw, lwaDb: lwWp.lwaDb, visible: lwWpVisible } : null,
-      strassen: strassen.map(s => ({ id: s.id, name: s.name, typ: s.typ, breite: s.breite, punkte: s.punkte }))
+      strassen:     strassen.map(s => ({ id: s.id, name: s.name, typ: s.typ, breite: s.breite, punkte: s.punkte })),
+      bemassungen:  bemassungen.map(b => ({ id: b.id, p1: b.p1, p2: b.p2 })),
+      raumprogramm: raumprogramm.map(r => ({ id: r.id, name: r.name, breite: r.breite, laenge: r.laenge, stockwerke: r.stockwerke, drehung: r.drehung, nutzung: r.nutzung, baujahr: r.baujahr, waerme: r.waerme, heizlast: r.heizlast, placed: r.placed }))
     };
     localStorage.setItem('energiekarte_autosave', JSON.stringify(project));
   } catch(e) {}
@@ -5160,7 +5238,13 @@ function loadAutosave() {
       updateLwWpDisplay();
       updateLwWpVisibility();
     }
-    if (project.strassen && project.strassen.length) strassenRestoreFromJSON(project.strassen);
+    if (project.strassen    && project.strassen.length)    strassenRestoreFromJSON(project.strassen);
+    if (project.bemassungen && project.bemassungen.length) bemassungenRestoreFromJSON(project.bemassungen);
+    if (project.raumprogramm && project.raumprogramm.length) {
+      raumprogramm = project.raumprogramm.map(r => ({ ...r }));
+      raumprogrammIdCounter = Math.max(...raumprogramm.map(r => r.id), 0) + 1;
+      renderRaumprogrammList();
+    }
     renderList(); updateViz(); updateTotals();
     showHint('✓ Autosave wiederhergestellt.');
     setTimeout(hideHint, 3000);
@@ -16367,6 +16451,222 @@ function elInit() {
   setTimeout(()=>renderCtrlStrip(), 100);
 }
 
+// ── Raumprogramm (Excel-Import) ───────────────────────────────────────────
+
+function rpImportExcel(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      raumprogramm = []; raumprogrammIdCounter = 1;
+      rows.forEach(row => {
+        const breite  = parseFloat(row['Breite_m']  || row['Breite']  || 0);
+        const laenge  = parseFloat(row['Laenge_m']  || row['Länge_m'] || row['Laenge'] || row['Länge'] || 0);
+        if (!breite || !laenge) return;
+        const nutzung = String(row['Nutzung'] || row['nutzung'] || '').toLowerCase().trim();
+        const validNutzungen = ['efh','mfh','ghd','schule','buero','industrie','oeffentlich'];
+        raumprogramm.push({
+          id: raumprogrammIdCounter++,
+          name:      String(row['Name'] || row['name'] || `Gebäude ${raumprogrammIdCounter}`).trim(),
+          breite, laenge,
+          stockwerke: Math.max(1, parseInt(row['Stockwerke'] || row['stockwerke'] || 1) || 1),
+          drehung:    parseFloat(row['Drehung_Grad'] || row['Drehung'] || 0) || 0,
+          nutzung:    validNutzungen.includes(nutzung) ? nutzung : '',
+          baujahr:    parseInt(row['Baujahr'] || row['baujahr'] || 0) || null,
+          waerme:     parseFloat(row['Waerme_MWh_a'] || row['Wärme_MWh_a'] || 0) || null,
+          heizlast:   parseFloat(row['Heizlast_kW'] || row['Heizlast'] || 0) || null,
+          placed: false
+        });
+      });
+      renderRaumprogrammList();
+      showHint(`✓ ${raumprogramm.length} Gebäude aus Raumprogramm geladen.`);
+      setTimeout(hideHint, 3000);
+    } catch(err) {
+      showHint('Fehler beim Einlesen der Excel-Datei.');
+      console.error(err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  event.target.value = '';
+}
+
+function rpDownloadTemplate() {
+  if (!window.XLSX) { alert('XLSX-Bibliothek nicht geladen.'); return; }
+  const header = ['Name','Breite_m','Laenge_m','Stockwerke','Drehung_Grad','Nutzung','Baujahr','Waerme_MWh_a','Heizlast_kW'];
+  const rows = [
+    header,
+    ['Wohngebäude A', 30, 14, 4, 0,  'MFH',    1990, '', ''],
+    ['Wohngebäude B', 20, 12, 3, 0,  'MFH',    1985, '', ''],
+    ['Kita',          22, 18, 1, 0,  'Schule', 2005, '', ''],
+    ['Gewerbe Nord',  40, 20, 2, 90, 'GHD',    2000, '', ''],
+    ['EFH Typ A',     12,  9, 2, 0,  'EFH',    2010, '', ''],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = header.map((_, i) => ({ wch: i === 0 ? 20 : 13 }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Raumprogramm');
+  XLSX.writeFile(wb, 'raumprogramm_vorlage.xlsx');
+}
+
+function rpPlacieren(id) {
+  const rp = raumprogramm.find(x => x.id === id);
+  if (!rp) return;
+  parametricWidth    = rp.breite;
+  parametricLength   = rp.laenge;
+  parametricRotation = rp.drehung;
+  parametricRpId     = id;
+  document.getElementById('param-width').value    = rp.breite;
+  document.getElementById('param-length').value   = rp.laenge;
+  document.getElementById('param-rotation').value = rp.drehung;
+  document.getElementById('param-area-disp').textContent = Math.round(rp.breite * rp.laenge) + ' m²';
+  startParametricPlace();
+}
+
+function renderRaumprogrammList() {
+  const el = document.getElementById('rp-list');
+  if (!el) return;
+  if (!raumprogramm.length) {
+    el.innerHTML = '<div style="font-size:10px;color:var(--muted);">Noch keine Gebäude geladen. Vorlage herunterladen und ausfüllen.</div>';
+    return;
+  }
+  const total = raumprogramm.length;
+  const placed = raumprogramm.filter(x => x.placed).length;
+  el.innerHTML = `<div style="font-size:9px;color:var(--muted);margin-bottom:4px;">${placed} / ${total} platziert</div>`
+    + raumprogramm.map(rp => `
+      <div class="rp-item${rp.placed ? ' placed' : ''}">
+        <div class="rp-dot${rp.placed ? ' placed' : ''}"></div>
+        <span class="rp-item-name" title="${escHtml(rp.name)}">${escHtml(rp.name)}</span>
+        <span class="rp-item-dims">${rp.breite}×${rp.laenge}m · ${rp.stockwerke}St.</span>
+        ${!rp.placed
+          ? `<button class="btn-xs blue" onclick="rpPlacieren(${rp.id})" style="flex-shrink:0;padding:2px 6px;font-size:9px;">+ Platz.</button>`
+          : '<span style="font-size:9px;color:#4caf50;flex-shrink:0;">✓</span>'}
+      </div>`).join('');
+}
+
+// ── Bemaßungslinien ───────────────────────────────────────────────────────
+
+function bemDistanzM(p1, p2) {
+  const R = 6371000;
+  const φ1 = p1.lat * Math.PI / 180, φ2 = p2.lat * Math.PI / 180;
+  const Δφ = (p2.lat - p1.lat) * Math.PI / 180;
+  const Δλ = (p2.lng - p1.lng) * Math.PI / 180;
+  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function toggleBemPanel() {
+  const p = document.getElementById('bem-panel');
+  const btn = document.getElementById('btn-bem-toggle');
+  const isVis = p.classList.contains('visible');
+  hidePanels();
+  if (!isVis) {
+    p.classList.add('visible');
+    btn.classList.add('active');
+    renderBemassungenList();
+  } else {
+    btn.classList.remove('active');
+  }
+}
+
+function toggleBemassungDraw() {
+  if (isDrawingBemasssung) {
+    cancelBemassungDraw();
+  } else {
+    isDrawingBemasssung = true;
+    bemassungP1 = null;
+    document.getElementById('btn-bem-draw').classList.add('active');
+    map.getContainer().style.cursor = 'crosshair';
+    showHint('Ersten Punkt anklicken …');
+  }
+}
+
+function cancelBemassungDraw() {
+  isDrawingBemasssung = false;
+  bemassungP1 = null;
+  if (bemassungP1Marker) { map.removeLayer(bemassungP1Marker); bemassungP1Marker = null; }
+  const btn = document.getElementById('btn-bem-draw');
+  if (btn) btn.classList.remove('active');
+  map.getContainer().style.cursor = '';
+  hideHint();
+}
+
+function renderBemassungOnMap(b) {
+  if (b._layers) b._layers.forEach(l => bemassungLayerGroup.removeLayer(l));
+  const dist = bemDistanzM(b.p1, b.p2);
+  const label = dist >= 1000
+    ? (dist / 1000).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' km'
+    : dist.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' m';
+  const mid = { lat: (b.p1.lat + b.p2.lat) / 2, lng: (b.p1.lng + b.p2.lng) / 2 };
+
+  const line = L.polyline([b.p1, b.p2], {
+    color: '#f9a825', weight: 1.5, dashArray: '5 4', opacity: 0.95, interactive: false
+  });
+  const ep1 = L.circleMarker(b.p1, { radius: 3, color: '#f9a825', fillColor: '#f9a825', fillOpacity: 1, weight: 1, interactive: false });
+  const ep2 = L.circleMarker(b.p2, { radius: 3, color: '#f9a825', fillColor: '#f9a825', fillOpacity: 1, weight: 1, interactive: false });
+  const labelIcon = L.divIcon({
+    className: '',
+    html: `<div class="bem-label" onclick="bemLoeschen(${b.id})" title="Klick zum Löschen">${label}</div>`,
+    iconAnchor: [25, 10]
+  });
+  const labelMarker = L.marker(mid, { icon: labelIcon, zIndexOffset: 600 });
+
+  line.addTo(bemassungLayerGroup);
+  ep1.addTo(bemassungLayerGroup);
+  ep2.addTo(bemassungLayerGroup);
+  labelMarker.addTo(bemassungLayerGroup);
+  b._layers = [line, ep1, ep2, labelMarker];
+}
+
+function bemLoeschen(id) {
+  const b = bemassungen.find(x => x.id === id);
+  if (b?._layers) b._layers.forEach(l => bemassungLayerGroup.removeLayer(l));
+  bemassungen = bemassungen.filter(x => x.id !== id);
+  renderBemassungenList();
+}
+
+function bemassungenAlleLoeschen() {
+  bemassungen.forEach(b => { if (b._layers) b._layers.forEach(l => bemassungLayerGroup.removeLayer(l)); });
+  bemassungen = [];
+  renderBemassungenList();
+}
+
+function renderBemassungenList() {
+  const el = document.getElementById('bem-list');
+  if (!el) return;
+  if (!bemassungen.length) {
+    el.innerHTML = '<div style="font-size:10px;color:var(--muted);">Noch keine Bemaßungen.</div>';
+    return;
+  }
+  el.innerHTML = bemassungen.map(b => {
+    const dist = bemDistanzM(b.p1, b.p2);
+    const label = dist >= 1000
+      ? (dist / 1000).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' km'
+      : dist.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' m';
+    return `<div class="bem-item">
+      <span style="color:#f9a825;font-family:'DM Mono',monospace;font-size:11px;flex:1;">${label}</span>
+      <button class="btn-xs red" onclick="bemLoeschen(${b.id})" style="flex-shrink:0;padding:2px 5px;">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function bemassungenRestoreFromJSON(data) {
+  if (!data || !data.length) return;
+  bemassungen = []; bemassungIdCounter = 1;
+  data.forEach(b => {
+    const obj = { id: b.id, p1: b.p1, p2: b.p2, _layers: null };
+    bemassungen.push(obj);
+    renderBemassungOnMap(obj);
+    if (b.id >= bemassungIdCounter) bemassungIdCounter = b.id + 1;
+  });
+  renderBemassungenList();
+}
+
+// ── Ende Bemaßungslinien-Modul ────────────────────────────────────────────
+
 // ── Parametrische Gebäudeplatzierung ─────────────────────────────────────
 
 function calcRectanglePolygon(lat, lng, widthM, lengthM, rotDeg) {
@@ -16599,6 +16899,40 @@ elInit();   // Elektro-Modul starten (nach map-Init, einmalig)
       <span class="t-icon">+</span> Auf Karte platzieren
     </button>
     <button class="btn-secondary" onclick="toggleParametricPanel()">Schließen</button>
+  </div>
+
+  <!-- Raumprogramm-Sektion -->
+  <div style="border-top:1px solid var(--border);margin-top:12px;padding-top:10px;">
+    <div class="huelle-section-title" style="margin-bottom:6px;">📋 Raumprogramm aus Excel importieren</div>
+    <div class="panel-btns" style="margin-bottom:6px;flex-wrap:wrap;gap:5px;">
+      <label class="tool-btn green" style="cursor:pointer;" title="XLSX-Datei laden">
+        <span class="t-icon">↑</span> Excel laden
+        <input type="file" accept=".xlsx,.xls" style="display:none" onchange="rpImportExcel(event)"/>
+      </label>
+      <button class="btn-secondary" onclick="rpDownloadTemplate()" title="Vorlage herunterladen">⬇ Vorlage</button>
+      <button class="btn-secondary" onclick="raumprogramm=[];renderRaumprogrammList()">Leeren</button>
+    </div>
+    <div id="rp-list" class="rp-list">
+      <div style="font-size:10px;color:var(--muted);">Noch keine Gebäude geladen.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Bemaßungslinien ────────────────────────────────────────────────────── -->
+<div class="float-panel amber-border" id="bem-panel" style="min-width:280px;">
+  <div class="panel-drag-handle" onmousedown="startDrag(event,'bem-panel')">
+    <span style="color:#f9a825;font-size:12px">📏 Bemaßungslinien</span>
+    <span class="drag-dots">⠿</span>
+  </div>
+  <div class="panel-info" style="margin-bottom:8px;">Zwei Punkte anklicken um eine Bemaßungslinie zu zeichnen. Klick auf die Beschriftung löscht die Linie.</div>
+  <div class="panel-btns" style="margin-bottom:8px;">
+    <button class="tool-btn amber" id="btn-bem-draw" onclick="toggleBemassungDraw()">
+      <span class="t-icon">📏</span> Messen starten
+    </button>
+    <button class="btn-secondary" onclick="bemassungenAlleLoeschen()">Alle löschen</button>
+  </div>
+  <div id="bem-list" class="bem-list">
+    <div style="font-size:10px;color:var(--muted);">Noch keine Bemaßungen.</div>
   </div>
 </div>
 
