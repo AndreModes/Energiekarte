@@ -880,6 +880,8 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
       <input type="file" id="import-file" style="display:none" accept=".json" onchange="importJSON(event)">
       <button class="btn-export primary" onclick="document.getElementById('import-file').click()">📂 Öffnen</button>
       <button class="btn-export primary" onclick="exportJSON()">💾 Speichern</button>
+      <input type="file" id="feldbericht-file" style="display:none" accept=".json" onchange="importFeldbericht(event)">
+      <button class="btn-export" onclick="document.getElementById('feldbericht-file').click()" title="Feldbericht aus Vor-Ort-App importieren">📋 Feldbericht</button>
       <button class="btn-export" id="btn-send-to-lr" onclick="sendToLiegenschaftsrechner()" style="display:none;" title="Gebäudedaten an Liegenschaftsrechner übernehmen">📤 An Liegenschaftsrechner senden</button>
       <button class="btn-export" onclick="elExportExcel()">📊 Excel Export</button>
       <input type="file" id="el-import-xlsx" style="display:none" accept=".xlsx,.xls" onchange="elImportExcel(event)">
@@ -1729,7 +1731,7 @@ function addGebaeude(opts={}){
            polygon:null,polygonLayer:null,circleMarker:null,labelMarker:null,
            fromOsm:opts.fromOsm||false,osmId:opts.osmId||null,
            baujahr: opts.baujahr!=null?opts.baujahr:null, abrissjahr: null, sanierungen: [], selected: false,
-           huelle: null};
+           huelle: null, feldBericht: null};
   // Aktives Szenario: Gebäude dem Szenario zuordnen
   const _activeSz = EL.szenarien.find(s => s.id === EL.aktivSzenario);
   if (_activeSz && !opts.id) { // nur neue Gebäude (nicht beim Laden)
@@ -4304,7 +4306,15 @@ function renderList(){
         <button class="btn-xs" onclick="dupliziereGebaeude(${g.id})" title="Gebäude duplizieren (20 m versetzt)" style="border-color:#b39ddb;color:#b39ddb;">📋 Kopie</button>
         <button class="btn-xs" onclick="removeGebaeude(${g.id})" title="Löschen" style="margin-left:auto">&#10005;</button>
       </div>
-      
+      ${g.feldBericht ? `
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:5px 8px;background:var(--bg);border-radius:5px;border-left:3px solid ${feldBerichtZustandFarbe(g.feldBericht.zustand)};">
+        <span style="font-size:10px;color:var(--muted);">Vor Ort:</span>
+        <span style="font-size:10px;color:${feldBerichtZustandFarbe(g.feldBericht.zustand)};">${feldBerichtZustandLabel(g.feldBericht.zustand)}</span>
+        ${g.feldBericht.fotos?.length ? `<span style="font-size:10px;color:var(--muted);">📷 ${g.feldBericht.fotos.length}</span>` : ''}
+        ${g.feldBericht.notizen ? `<span style="font-size:10px;color:var(--muted);" title="${escHtml(g.feldBericht.notizen)}">📝</span>` : ''}
+        ${g.feldBericht.erfasstAm ? `<span style="font-size:9px;color:var(--muted);margin-left:auto;">${new Date(g.feldBericht.erfasstAm).toLocaleDateString('de-DE')}</span>` : ''}
+      </div>` : ''}
+
       <div class="plan-panel" id="plan-${g.id}">
         <div style="font-size:10px; color:var(--accent); margin-bottom:8px;">Lebenszyklus & Sanierung</div>
         
@@ -4353,7 +4363,8 @@ function exportJSON(){
       flaeche: g.flaeche, nutzung: g.nutzung, fromOsm: g.fromOsm, osmId: g.osmId, polygon: g.polygon,
       baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen,
       huelle: g.huelle || null,
-      pv: g.pv || null
+      pv: g.pv || null,
+      feldBericht: g.feldBericht || null
     })),
     netz: {
       zentrale: document.getElementById('netz-zentrale').value,
@@ -4890,8 +4901,9 @@ function importJSON(event) {
             newG.abrissjahr = g.abrissjahr;
             newG.sanierungen = g.sanierungen || [];
             newG.nutzung = g.nutzung || '';
-            newG.huelle = g.huelle || null;
-            newG.pv     = g.pv    || null;
+            newG.huelle      = g.huelle      || null;
+            newG.pv          = g.pv          || null;
+            newG.feldBericht = g.feldBericht || null;
             if (g.id >= idCounter) idCounter = g.id + 1;
          });
       }
@@ -5315,7 +5327,7 @@ function loadAutosave() {
         const newG = addGebaeude({ id: g.id, coords: g.polygon, name: g.name, fromOsm: g.fromOsm, osmId: g.osmId });
         Object.assign(newG, { waerme: g.waerme, heizlast: g.heizlast, spez: g.spez, spezHeizlast: g.spezHeizlast,
           flaeche: g.flaeche, nutzung: g.nutzung||'', baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen||[],
-          huelle: g.huelle||null, pv: g.pv||null });
+          huelle: g.huelle||null, pv: g.pv||null, feldBericht: g.feldBericht||null });
         if (g.id >= idCounter) idCounter = g.id + 1;
       });
     }
@@ -17034,6 +17046,46 @@ function dupliziereGebaeude(id, dxM, dyM) {
 }
 
 // ── PV-Potenzial-Analyse ───────────────────────────────────────────────────
+
+// ── Feldbericht (Vor-Ort-App) ─────────────────────────────────────────────
+
+function importFeldbericht(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const report = JSON.parse(e.target.result);
+      if (report.typ !== 'feldbericht') { alert('Keine Feldbericht-Datei.'); return; }
+      let count = 0;
+      (report.eintraege || []).forEach(entry => {
+        const g = gebaeude.find(x => x.id === entry.id);
+        if (!g) return;
+        g.feldBericht = { zustand: entry.zustand || '', notizen: entry.notizen || '',
+          fotos: entry.fotos || [], erfasstAm: entry.erfasstAm || null };
+        count++;
+      });
+      renderList();
+      showHint(`Feldbericht importiert: ${count} Gebäude aktualisiert.`);
+    } catch(err) { alert('Fehler beim Import: ' + err.message); }
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+function feldBerichtZustandFarbe(z) {
+  if (z === 'gut')      return '#4caf50';
+  if (z === 'mittel')   return '#f9a825';
+  if (z === 'schlecht') return '#e53935';
+  return '#7a8099';
+}
+
+function feldBerichtZustandLabel(z) {
+  if (z === 'gut')      return '🟢 Gut';
+  if (z === 'mittel')   return '🟡 Mittel';
+  if (z === 'schlecht') return '🔴 Schlecht';
+  return '—';
+}
 
 function pvCentroidLat(g) {
   if (!g.polygon || !g.polygon.length) return 51;
