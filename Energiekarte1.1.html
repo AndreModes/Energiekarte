@@ -552,6 +552,9 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
     <button class="tool-btn" id="btn-array-toggle" onclick="toggleArrayPanel()" title="Gebäude-Array – Reihe duplizieren" style="border-color:#7e57c2;color:#b39ddb;">
       <span class="t-icon">⊞</span> Array
     </button>
+    <button class="tool-btn amber" id="btn-pv-toggle" onclick="togglePvPanel()" title="PV-Potenzial-Analyse">
+      <span class="t-icon">☀</span> PV
+    </button>
     <button class="tool-btn" id="btn-tile" onclick="toggleTile()" style="border-color:#607d8b;color:#90a4ae;">🛰</button>
   </div>
 </header>
@@ -3257,6 +3260,7 @@ function hidePanels(){
   document.getElementById('flaechen-panel').classList.remove('visible');
   document.getElementById('beschriftungen-panel').classList.remove('visible');
   document.getElementById('array-panel').classList.remove('visible');
+  document.getElementById('pv-panel').style.display = 'none';
   document.getElementById('btn-netz-toggle').classList.remove('active');
   document.getElementById('btn-fliessgewaesser-toggle').classList.remove('active');
   document.getElementById('btn-lwwp-toggle').classList.remove('active');
@@ -3268,6 +3272,7 @@ function hidePanels(){
   document.getElementById('btn-flaechen-toggle').classList.remove('active');
   document.getElementById('btn-besch-toggle').classList.remove('active');
   document.getElementById('btn-array-toggle').classList.remove('active');
+  document.getElementById('btn-pv-toggle').classList.remove('active');
   if (isPlacingLwWp) togglePlaceLwWp();
   if (isPlacingParametric) cancelParametricPlace();
   if (isDrawingFlaeche) flaecheCancel();
@@ -4295,6 +4300,7 @@ function renderList(){
         ${g.polygon ? '<button class="btn-xs purple" onclick="flyTo(' + g.id + ')">&#8982;</button>' : ''}
         <button class="btn-xs" onclick="togglePlanPanel(${g.id})" title="Planung & Sanierung">🔧 Planen</button>
         <button class="btn-xs" onclick="openHuellePanel(${g.id})" title="Gebäudehülle &amp; Transmissionsverluste" style="border-color:#26a69a;color:#80cbc4;">🏠 Hülle</button>
+        <button class="btn-xs" onclick="togglePvPanel()" title="PV-Potenzial anzeigen" style="border-color:#f9a825;color:#f9a825;">☀ PV</button>
         <button class="btn-xs" onclick="dupliziereGebaeude(${g.id})" title="Gebäude duplizieren (20 m versetzt)" style="border-color:#b39ddb;color:#b39ddb;">📋 Kopie</button>
         <button class="btn-xs" onclick="removeGebaeude(${g.id})" title="Löschen" style="margin-left:auto">&#10005;</button>
       </div>
@@ -4346,7 +4352,8 @@ function exportJSON(){
       id: g.id, name: g.name, waerme: g.waerme, heizlast: g.heizlast, spez: g.spez, spezHeizlast: g.spezHeizlast,
       flaeche: g.flaeche, nutzung: g.nutzung, fromOsm: g.fromOsm, osmId: g.osmId, polygon: g.polygon,
       baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen,
-      huelle: g.huelle || null
+      huelle: g.huelle || null,
+      pv: g.pv || null
     })),
     netz: {
       zentrale: document.getElementById('netz-zentrale').value,
@@ -4884,6 +4891,7 @@ function importJSON(event) {
             newG.sanierungen = g.sanierungen || [];
             newG.nutzung = g.nutzung || '';
             newG.huelle = g.huelle || null;
+            newG.pv     = g.pv    || null;
             if (g.id >= idCounter) idCounter = g.id + 1;
          });
       }
@@ -5307,7 +5315,7 @@ function loadAutosave() {
         const newG = addGebaeude({ id: g.id, coords: g.polygon, name: g.name, fromOsm: g.fromOsm, osmId: g.osmId });
         Object.assign(newG, { waerme: g.waerme, heizlast: g.heizlast, spez: g.spez, spezHeizlast: g.spezHeizlast,
           flaeche: g.flaeche, nutzung: g.nutzung||'', baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen||[],
-          huelle: g.huelle||null });
+          huelle: g.huelle||null, pv: g.pv||null });
         if (g.id >= idCounter) idCounter = g.id + 1;
       });
     }
@@ -17021,7 +17029,235 @@ function dupliziereGebaeude(id, dxM, dyM) {
     coords: newCoords
   });
   if (g.huelle) newG.huelle = JSON.parse(JSON.stringify(g.huelle));
+  if (g.pv)    newG.pv    = JSON.parse(JSON.stringify(g.pv));
   return newG;
+}
+
+// ── PV-Potenzial-Analyse ───────────────────────────────────────────────────
+
+function pvCentroidLat(g) {
+  if (!g.polygon || !g.polygon.length) return 51;
+  const lats = g.polygon.map(p => Array.isArray(p) ? p[0] : p.lat);
+  return lats.reduce((a, b) => a + b, 0) / lats.length;
+}
+
+function pvCentroidLng(g) {
+  if (!g.polygon || !g.polygon.length) return 10;
+  const lngs = g.polygon.map(p => Array.isArray(p) ? p[1] : p.lng);
+  return lngs.reduce((a, b) => a + b, 0) / lngs.length;
+}
+
+function pvElAssetFuerGebaeude(gId) {
+  const alle = typeof elGetMergedAssets === 'function' ? elGetMergedAssets() : (EL?.assets || []);
+  return alle.find(a => a.type === 'PV' && a.buildingId === gId) || null;
+}
+
+function pvUebernehmenEins(id) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  const r = calcPvPotenzial(g);
+  if (!r) return;
+  let asset = pvElAssetFuerGebaeude(id);
+  if (asset) {
+    asset.props.leistungKWp = r.kwp;
+    if (typeof elDrawMarker === 'function') elDrawMarker(asset);
+  } else if (typeof elCreateAsset === 'function') {
+    const lat = pvCentroidLat(g), lng = pvCentroidLng(g), d = 0.0002;
+    elCreateAsset('PV', lat - d * 0.5, lng + d, {
+      buildingId: id, name: 'PV ' + g.name, props: { leistungKWp: r.kwp }
+    });
+  }
+  if (typeof elCalc === 'function' && (EL?.assets?.length || 0) > 0) elCalc();
+  renderPvPanel();
+}
+
+function pvUebernehmenAlle() {
+  gebaeude.filter(g => g.flaeche).forEach(g => {
+    const r = calcPvPotenzial(g);
+    if (!r) return;
+    let asset = pvElAssetFuerGebaeude(g.id);
+    if (asset) {
+      asset.props.leistungKWp = r.kwp;
+      if (typeof elDrawMarker === 'function') elDrawMarker(asset);
+    } else if (typeof elCreateAsset === 'function') {
+      const lat = pvCentroidLat(g), lng = pvCentroidLng(g), d = 0.0002;
+      elCreateAsset('PV', lat - d * 0.5, lng + d, {
+        buildingId: g.id, name: 'PV ' + g.name, props: { leistungKWp: r.kwp }
+      });
+    }
+  });
+  if (typeof elCalc === 'function' && (EL?.assets?.length || 0) > 0) elCalc();
+  renderPvPanel();
+  showHint('PV-Potenzial für alle Gebäude ins Elektromodul übernommen.');
+}
+
+function pvSpezErtrag(lat) {
+  if (lat < 48) return 1050;
+  if (lat < 50) return 1000;
+  if (lat < 52) return  950;
+  if (lat < 54) return  900;
+  return 875;
+}
+
+function pvKorrFaktor(azimuth, neigung) {
+  const az = Math.abs(azimuth % 360);
+  const azNorm = az > 180 ? 360 - az : az; // 0=Süd, 180=Nord
+  const azKorr = azNorm <= 90
+    ? 1.0 - (azNorm / 90) * 0.13
+    : 0.87 - ((azNorm - 90) / 90) * 0.27;
+  const n = Math.max(0, Math.min(90, neigung));
+  let nKorr;
+  if (n <= 30)      nKorr = 0.87 + (n / 30) * 0.13;
+  else if (n <= 45) nKorr = 1.00 - ((n - 30) / 15) * 0.03;
+  else              nKorr = 0.97 - ((n - 45) / 45) * 0.32;
+  return Math.round(azKorr * nKorr * 100) / 100;
+}
+
+function calcPvPotenzial(g) {
+  if (!g.flaeche) return null;
+  const pv      = g.pv || {};
+  const faktor  = pv.faktor  !== undefined ? pv.faktor  : 0.70;
+  const neigung = pv.neigung !== undefined ? pv.neigung : 30;
+  const azimuth = pv.azimuth !== undefined ? pv.azimuth : 0;
+  const nutzflaeche = g.flaeche * faktor;
+  const kwp         = nutzflaeche / 6.5;
+  const lat         = pvCentroidLat(g);
+  const spezErtrag  = pvSpezErtrag(lat);
+  const korr        = pvKorrFaktor(azimuth, neigung);
+  const ertragJahr  = kwp * spezErtrag * korr;
+  const co2Jahr     = ertragJahr * 0.380;
+  return {
+    nutzflaeche: Math.round(nutzflaeche),
+    kwp:         Math.round(kwp * 10) / 10,
+    spezErtrag,
+    korr:        Math.round(korr * 100),
+    ertragJahr:  Math.round(ertragJahr),
+    co2Jahr:     Math.round(co2Jahr)
+  };
+}
+
+function pvSetField(id, field, value) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  if (!g.pv) g.pv = {};
+  g.pv[field] = value;
+  renderPvPanel();
+}
+
+function togglePvPanel() {
+  const p   = document.getElementById('pv-panel');
+  const btn = document.getElementById('btn-pv-toggle');
+  const isVis = p.style.display === 'flex';
+  hidePanels();
+  if (!isVis) {
+    p.style.display = 'flex';
+    btn.classList.add('active');
+    renderPvPanel();
+  } else {
+    btn.classList.remove('active');
+  }
+}
+
+function pvUpdateSummary() {
+  let totalKwp = 0, totalErtrag = 0, totalCo2 = 0;
+  gebaeude.filter(g => g.flaeche).forEach(g => {
+    const r = calcPvPotenzial(g);
+    if (r) { totalKwp += r.kwp; totalErtrag += r.ertragJahr; totalCo2 += r.co2Jahr; }
+  });
+  const el = document.getElementById('pv-summary');
+  if (!el) return;
+  if (totalKwp === 0) { el.textContent = '—'; return; }
+  el.innerHTML =
+    `<span style="color:#f9a825;">${totalKwp.toFixed(1)} kWp</span> &nbsp;·&nbsp; ` +
+    `<span style="color:#4caf50;">${(totalErtrag/1000).toFixed(1)} MWh/a</span> &nbsp;·&nbsp; ` +
+    `<span style="color:#80cbc4;">${(totalCo2/1000).toFixed(1)} t CO₂/a</span>`;
+}
+
+function renderPvPanel() {
+  const container = document.getElementById('pv-list');
+  container.innerHTML = '';
+  const mitFlaeche  = gebaeude.filter(g => g.flaeche);
+  const ohneFlaeche = gebaeude.filter(g => !g.flaeche);
+  if (!mitFlaeche.length) {
+    container.innerHTML = '<div style="font-size:10px;color:var(--muted);padding:8px 0;">Keine Gebäude mit Grundfläche. Gebäude zeichnen oder parametrisch platzieren.</div>';
+    pvUpdateSummary();
+    return;
+  }
+  mitFlaeche.forEach(g => {
+    const pv      = g.pv || {};
+    const faktor  = pv.faktor  !== undefined ? pv.faktor  : 0.70;
+    const neigung = pv.neigung !== undefined ? pv.neigung : 30;
+    const azimuth = pv.azimuth !== undefined ? pv.azimuth : 0;
+    const r = calcPvPotenzial(g);
+    const elAsset = pvElAssetFuerGebaeude(g.id);
+    const elKwp   = elAsset ? (parseFloat(elAsset.props?.leistungKWp) || 0) : null;
+
+    // Asset-Status: grün=übereinstimmend, orange=abweichend, grau=kein Asset
+    let statusHtml = '';
+    if (elAsset === null) {
+      statusHtml = `<span style="font-size:9px;background:#2a3050;color:var(--muted);border-radius:3px;padding:1px 6px;">Kein Elektro-Asset</span>`;
+    } else if (r && Math.abs(elKwp - r.kwp) < 0.2) {
+      statusHtml = `<span style="font-size:9px;background:#1b3a2a;color:#4caf50;border-radius:3px;padding:1px 6px;">✓ Asset ${elKwp} kWp</span>`;
+    } else {
+      statusHtml = `<span style="font-size:9px;background:#2a2010;color:#f9a825;border-radius:3px;padding:1px 6px;">Asset ${elKwp} kWp ≠ Potenzial ${r?.kwp} kWp</span>`;
+    }
+
+    const row = document.createElement('div');
+    row.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;border-left:3px solid #f9a825;';
+    row.innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--accent);">${escHtml(g.name)}</span>
+        <span style="font-size:9px;color:var(--muted);">GF ${Math.round(g.flaeche)} m²</span>
+        ${statusHtml}
+        ${r ? `<button class="btn-xs" onclick="pvUebernehmenEins(${g.id})"
+          style="margin-left:auto;border-color:#f9a825;color:#f9a825;flex-shrink:0;"
+          title="Berechnetes kWp ins Elektromodul übernehmen">→ Übernehmen</button>` : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:6px;">
+        <div class="inp-group">
+          <div class="inp-label">Nutzflächen-Faktor</div>
+          <input class="inp-field" type="number" min="0.1" max="1" step="0.05" value="${faktor}"
+            oninput="pvSetField(${g.id},'faktor',parseFloat(this.value)||0.7)"/>
+        </div>
+        <div class="inp-group">
+          <div class="inp-label">Neigung °</div>
+          <input class="inp-field" type="number" min="0" max="90" value="${neigung}"
+            oninput="pvSetField(${g.id},'neigung',parseFloat(this.value)||30)"/>
+        </div>
+        <div class="inp-group">
+          <div class="inp-label">Azimut v. Süd °</div>
+          <input class="inp-field" type="number" min="-180" max="180" value="${azimuth}"
+            title="0=Süd, −90=Ost, +90=West, 180=Nord"
+            oninput="pvSetField(${g.id},'azimuth',parseFloat(this.value)||0)"/>
+        </div>
+      </div>
+      ${r ? `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">
+        <div style="background:var(--bg);border-radius:4px;padding:6px 4px;text-align:center;">
+          <div style="font-size:15px;color:#f9a825;font-family:'DM Mono',monospace;font-weight:500;">${r.kwp}</div>
+          <div style="font-size:9px;color:var(--muted);">kWp install.</div>
+        </div>
+        <div style="background:var(--bg);border-radius:4px;padding:6px 4px;text-align:center;">
+          <div style="font-size:15px;color:#4caf50;font-family:'DM Mono',monospace;font-weight:500;">${(r.ertragJahr/1000).toFixed(1)}</div>
+          <div style="font-size:9px;color:var(--muted);">MWh/a Ertrag</div>
+        </div>
+        <div style="background:var(--bg);border-radius:4px;padding:6px 4px;text-align:center;">
+          <div style="font-size:15px;color:#80cbc4;font-family:'DM Mono',monospace;font-weight:500;">${(r.co2Jahr/1000).toFixed(1)}</div>
+          <div style="font-size:9px;color:var(--muted);">t CO₂/a</div>
+        </div>
+      </div>
+      <div style="font-size:9px;color:var(--muted);margin-top:4px;">
+        Nutzfläche ${r.nutzflaeche} m² · Spez. Ertrag ${r.spezErtrag} kWh/kWp·a · Korrekturfaktor ${r.korr}%
+      </div>` : ''}`;
+    container.appendChild(row);
+  });
+  if (ohneFlaeche.length) {
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:10px;color:var(--muted);padding:4px 0;';
+    note.textContent = `${ohneFlaeche.length} Gebäude ohne Grundfläche nicht berücksichtigt.`;
+    container.appendChild(note);
+  }
+  pvUpdateSummary();
 }
 
 function toggleArrayPanel() {
@@ -17440,6 +17676,29 @@ elInit();   // Elektro-Modul starten (nach map-Init, einmalig)
     <span class="drag-dots">⠿</span>
   </div>
   <div id="huellen-panel-content" style="padding:10px 14px;overflow-y:auto;flex:1;"></div>
+</div>
+
+<!-- ── PV-Potenzial-Analyse ──────────────────────────────────────────────── -->
+<div class="float-panel amber-border" id="pv-panel" style="min-width:420px;max-height:85vh;overflow:hidden;display:none;flex-direction:column;">
+  <div class="panel-drag-handle" onmousedown="startDrag(event,'pv-panel')">
+    <span style="color:#f9a825;font-size:12px">☀ PV-Potenzial-Analyse</span>
+    <span class="drag-dots">⠿</span>
+  </div>
+  <div class="panel-info">
+    Vereinfachte Potenzialabschätzung auf Basis der Gebäude-Grundfläche.
+    Azimut: 0 = Süd · −90 = Ost · +90 = West · 180 = Nord.
+    Spez. Ertrag wird automatisch aus dem Standort (Breitengrad) ermittelt.
+  </div>
+  <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex-shrink:0;">
+    <span style="font-size:10px;color:var(--muted);">Gesamt:</span>
+    <span id="pv-summary" style="font-size:11px;font-family:'DM Mono',monospace;">—</span>
+    <button class="tool-btn amber" onclick="pvUebernehmenAlle()" style="margin-left:auto;flex-shrink:0;"
+      title="Berechnetes kWp aller Gebäude ins Elektromodul übernehmen / Elektro-Assets anlegen">
+      → Alle ins Elektromodul
+    </button>
+    <button class="btn-secondary" onclick="togglePvPanel()" style="flex-shrink:0;">Schließen</button>
+  </div>
+  <div id="pv-list" style="padding:10px 14px;overflow-y:auto;flex:1;"></div>
 </div>
 
 <!-- ── Gebäude-Array / Duplizieren ──────────────────────────────────────── -->
