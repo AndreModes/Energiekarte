@@ -12378,6 +12378,7 @@ function elToJSON() {
       baujahr:a.baujahr, abrissjahr:a.abrissjahr, sanierungen:a.sanierungen,
       massnahmen:a.massnahmen||[],
       profil: a.profil||null,
+      feldBericht: a.feldBericht||null,
     })),
     trassen: EL.trassen.map(t=>({id:t.id, pts:t.pts, fromOsm:t.fromOsm||false, osmId:t.osmId||null})),
     leitungen: EL.leitungen.map(l=>({
@@ -12439,6 +12440,7 @@ function elFromJSON(data) {
       baujahr:a.baujahr||null, abrissjahr:a.abrissjahr||null, sanierungen:a.sanierungen||[],
       massnahmen:a.massnahmen||[],
       profil: a.profil||null,
+      feldBericht: a.feldBericht||null,
       _marker:null,
     };
     EL.assets.push(asset);
@@ -17057,16 +17059,26 @@ function importFeldbericht(event) {
     try {
       const report = JSON.parse(e.target.result);
       if (report.typ !== 'feldbericht') { alert('Keine Feldbericht-Datei.'); return; }
-      let count = 0;
-      (report.eintraege || []).forEach(entry => {
+      let countGeb = 0, countAsset = 0;
+      // Rückwärtskompatibel: altes Format nutzte "eintraege", neues "eintraegeGebaeude"
+      const gebEintraege = report.eintraegeGebaeude || report.eintraege || [];
+      gebEintraege.forEach(entry => {
         const g = gebaeude.find(x => x.id === entry.id);
         if (!g) return;
-        g.feldBericht = { zustand: entry.zustand || '', notizen: entry.notizen || '',
-          fotos: entry.fotos || [], erfasstAm: entry.erfasstAm || null };
-        count++;
+        g.feldBericht = { zustand: entry.zustand||'', notizen: entry.notizen||'',
+          fotos: entry.fotos||[], erfasstAm: entry.erfasstAm||null };
+        countGeb++;
+      });
+      (report.eintraegeAssets || []).forEach(entry => {
+        const alle = typeof elGetMergedAssets === 'function' ? elGetMergedAssets() : (EL?.assets||[]);
+        const a = alle.find(x => x.id === entry.id);
+        if (!a) return;
+        a.feldBericht = { zustand: entry.zustand||'', notizen: entry.notizen||'',
+          fotos: entry.fotos||[], erfasstAm: entry.erfasstAm||null };
+        countAsset++;
       });
       renderList();
-      showHint(`Feldbericht importiert: ${count} Gebäude aktualisiert.`);
+      showHint(`Feldbericht importiert: ${countGeb} Gebäude, ${countAsset} Komponenten aktualisiert.`);
     } catch(err) { alert('Fehler beim Import: ' + err.message); }
     event.target.value = '';
   };
