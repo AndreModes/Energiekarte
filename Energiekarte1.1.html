@@ -2696,6 +2696,12 @@ map.on('click',e=>{
       renderRaumprogrammList();
       renderList();
     }
+    // Auto-create a linked electrical consumer asset at the building centroid
+    elCreateAsset('Verbraucher', e.latlng.lat, e.latlng.lng, {
+      buildingId: newG.id,
+      name: (newG.name || 'Gebäude') + ' (Verbraucher)',
+      baujahr: newG.baujahr
+    });
     // Stay in placement mode — user can press Esc to exit
     showHint('Klicke auf die Karte, um das nächste Gebäude zu platzieren. [Esc] zum Abbrechen.');
     return;
