@@ -17431,6 +17431,10 @@ function cancelParametricPlace() {
 
 // ── Gebäude verschieben & einrasten ──────────────────────────────────────
 
+function ptArr(p) {
+  return Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lng];
+}
+
 function distM(lat1, lng1, lat2, lng2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -17441,14 +17445,15 @@ function distM(lat1, lng1, lat2, lng2) {
 
 function getPolyCentroid(poly) {
   let lat = 0, lng = 0;
-  poly.forEach(p => { lat += p[0]; lng += p[1]; });
+  poly.forEach(p => { const a = ptArr(p); lat += a[0]; lng += a[1]; });
   return [lat / poly.length, lng / poly.length];
 }
 
 function edgeMidpoints(corners) {
   return corners.map((c, i) => {
-    const n = corners[(i + 1) % corners.length];
-    return [(c[0] + n[0]) / 2, (c[1] + n[1]) / 2];
+    const a = ptArr(c);
+    const b = ptArr(corners[(i + 1) % corners.length]);
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   });
 }
 
@@ -17462,7 +17467,7 @@ function snapThresholdM() {
 function findBestSnap(origPoly, candidateLat, candidateLng, origCLat, origCLng, excludeId) {
   const dLat = candidateLat - origCLat;
   const dLng = candidateLng - origCLng;
-  const movedCorners = origPoly.map(p => [p[0] + dLat, p[1] + dLng]);
+  const movedCorners = origPoly.map(p => { const a = ptArr(p); return [a[0] + dLat, a[1] + dLng]; });
   const movingPts = [...movedCorners, ...edgeMidpoints(movedCorners)];
 
   let bestDist = snapThresholdM();
@@ -17470,7 +17475,8 @@ function findBestSnap(origPoly, candidateLat, candidateLng, origCLat, origCLng, 
 
   gebaeude.forEach(g => {
     if (g.id === excludeId || !g.polygon) return;
-    const targetPts = [...g.polygon, ...edgeMidpoints(g.polygon)];
+    const normPoly = g.polygon.map(ptArr);
+    const targetPts = [...normPoly, ...edgeMidpoints(normPoly)];
     movingPts.forEach(mp => {
       targetPts.forEach(tp => {
         const d = distM(mp[0], mp[1], tp[0], tp[1]);
@@ -17488,7 +17494,7 @@ function findBestSnap(origPoly, candidateLat, candidateLng, origCLat, origCLng, 
 
 function addMoveHandle(g) {
   const c = getPolyCentroid(g.polygon);
-  const origPoly = g.polygon.map(p => [...p]);
+  const origPoly = g.polygon.map(ptArr);
   const origC = [c[0], c[1]];
 
   const handle = L.marker([c[0], c[1]], {
