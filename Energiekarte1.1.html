@@ -2696,7 +2696,8 @@ map.on('click',e=>{
       renderRaumprogrammList();
       renderList();
     }
-    cancelParametricPlace();
+    // Stay in placement mode — user can press Esc to exit
+    showHint('Klicke auf die Karte, um das nächste Gebäude zu platzieren. [Esc] zum Abbrechen.');
     return;
   }
   if (isDrawingStrasse) {
@@ -17525,7 +17526,8 @@ function addMoveHandle(g) {
 
     const dLat = lat - origC[0];
     const dLng = lng - origC[1];
-    const finalPoly = origPoly.map(p => [p[0] + dLat, p[1] + dLng]);
+    // Store as {lat,lng} objects — the convention used by polygonCenter, polygonAreaM2, etc.
+    const finalPoly = origPoly.map(p => ({ lat: p[0] + dLat, lng: p[1] + dLng }));
 
     g.polygon = finalPoly;
     g.polygonLayer.setLatLngs(finalPoly);
@@ -17534,7 +17536,7 @@ function addMoveHandle(g) {
 
     // Update originals so subsequent drags work correctly
     origC[0] = lat; origC[1] = lng;
-    origPoly.splice(0, origPoly.length, ...finalPoly);
+    origPoly.splice(0, origPoly.length, ...finalPoly.map(ptArr));
 
     renderList();
     autosave();
