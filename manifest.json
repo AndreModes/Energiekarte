@@ -1,0 +1,26 @@
+{
+  "name": "Energiekarte – Vor Ort",
+  "short_name": "Vor Ort",
+  "description": "Mobile Begehungs-App für Vor-Ort-Termine: Zustand, Fotos und Notizen je Gebäude und Komponente erfassen.",
+  "start_url": "./Energiekarte-VorOrt.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#0f1117",
+  "orientation": "portrait-primary",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "icon-vorort.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-vorort.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

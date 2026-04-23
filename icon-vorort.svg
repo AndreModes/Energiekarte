@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="38" fill="#181c27"/>
+  <!-- Map pin shape -->
+  <path d="M96 22 C68 22 46 44 46 72 C46 108 96 170 96 170 C96 170 146 108 146 72 C146 44 124 22 96 22Z" fill="#4fc3f7" opacity="0.92"/>
+  <!-- Inner circle -->
+  <circle cx="96" cy="72" r="26" fill="#181c27"/>
+  <!-- Lightning bolt -->
+  <path d="M101 50 L82 77 L96 77 L91 98 L110 67 L96 67 Z" fill="#f9a825"/>
+</svg>
