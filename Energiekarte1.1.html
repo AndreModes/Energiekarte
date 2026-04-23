@@ -555,6 +555,12 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
     <button class="tool-btn amber" id="btn-pv-toggle" onclick="togglePvPanel()" title="PV-Potenzial-Analyse">
       <span class="t-icon">☀</span> PV
     </button>
+    <button class="tool-btn" id="btn-move-toggle" onclick="toggleMoveMode()" title="Gebäude verschieben" style="border-color:#ff9800;color:#ffb74d;">
+      <span class="t-icon">✋</span> Bewegen
+    </button>
+    <button class="tool-btn" id="btn-snap-toggle" onclick="toggleSnap()" title="Einrasten: An" style="border-color:#ff9800;color:#ffb74d;">
+      🔲 Einrasten
+    </button>
     <button class="tool-btn" id="btn-tile" onclick="toggleTile()" style="border-color:#607d8b;color:#90a4ae;">🛰</button>
   </div>
 </header>
@@ -1320,6 +1326,11 @@ let parametricLength = 15;
 let parametricRotation = 0;
 let parametricPreviewLayer = null;
 let parametricRpId = null;
+
+// ── Gebäude verschieben & einrasten ───────────────────────────────────────
+let isMoveMode = false;
+let moveHandles = {};
+let snapEnabled = true;
 
 // ── Raumprogramm (Excel-Import) ───────────────────────────────────────────
 let raumprogramm = [];
@@ -2778,6 +2789,7 @@ map.on('zoomend', function() {
 
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
+    if (isMoveMode) toggleMoveMode();
     if (isPlacingParametric) cancelParametricPlace();
     if (isDrawingFlaeche) flaecheCancel();
     if (isDrawingStrasse) strasseCancel();
@@ -3275,6 +3287,7 @@ function hidePanels(){
   document.getElementById('btn-besch-toggle').classList.remove('active');
   document.getElementById('btn-array-toggle').classList.remove('active');
   document.getElementById('btn-pv-toggle').classList.remove('active');
+  if (isMoveMode) { isMoveMode = false; deactivateMoveHandles(); document.getElementById('btn-move-toggle').classList.remove('active'); hideHint(); }
   if (isPlacingLwWp) togglePlaceLwWp();
   if (isPlacingParametric) cancelParametricPlace();
   if (isDrawingFlaeche) flaecheCancel();
@@ -17414,6 +17427,146 @@ function cancelParametricPlace() {
   map.getContainer().style.cursor = '';
   map.doubleClickZoom.enable();
   hideHint();
+}
+
+// ── Gebäude verschieben & einrasten ──────────────────────────────────────
+
+function distM(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const cosLat = Math.cos(lat1 * Math.PI / 180);
+  return R * Math.sqrt(dLat * dLat + cosLat * cosLat * dLng * dLng);
+}
+
+function getPolyCentroid(poly) {
+  let lat = 0, lng = 0;
+  poly.forEach(p => { lat += p[0]; lng += p[1]; });
+  return [lat / poly.length, lng / poly.length];
+}
+
+function edgeMidpoints(corners) {
+  return corners.map((c, i) => {
+    const n = corners[(i + 1) % corners.length];
+    return [(c[0] + n[0]) / 2, (c[1] + n[1]) / 2];
+  });
+}
+
+function snapThresholdM() {
+  const center = map.getCenter();
+  const p1 = map.latLngToContainerPoint(center);
+  const ll2 = map.containerPointToLatLng(L.point(p1.x + 20, p1.y));
+  return distM(center.lat, center.lng, ll2.lat, ll2.lng);
+}
+
+function findBestSnap(origPoly, candidateLat, candidateLng, origCLat, origCLng, excludeId) {
+  const dLat = candidateLat - origCLat;
+  const dLng = candidateLng - origCLng;
+  const movedCorners = origPoly.map(p => [p[0] + dLat, p[1] + dLng]);
+  const movingPts = [...movedCorners, ...edgeMidpoints(movedCorners)];
+
+  let bestDist = snapThresholdM();
+  let snapLat = candidateLat, snapLng = candidateLng;
+
+  gebaeude.forEach(g => {
+    if (g.id === excludeId || !g.polygon) return;
+    const targetPts = [...g.polygon, ...edgeMidpoints(g.polygon)];
+    movingPts.forEach(mp => {
+      targetPts.forEach(tp => {
+        const d = distM(mp[0], mp[1], tp[0], tp[1]);
+        if (d < bestDist) {
+          bestDist = d;
+          snapLat = candidateLat + (tp[0] - mp[0]);
+          snapLng = candidateLng + (tp[1] - mp[1]);
+        }
+      });
+    });
+  });
+
+  return [snapLat, snapLng];
+}
+
+function addMoveHandle(g) {
+  const c = getPolyCentroid(g.polygon);
+  const origPoly = g.polygon.map(p => [...p]);
+  const origC = [c[0], c[1]];
+
+  const handle = L.marker([c[0], c[1]], {
+    draggable: true,
+    icon: L.divIcon({
+      className: '',
+      html: '<div style="width:18px;height:18px;background:#ff9800;border:2px solid #fff;border-radius:50%;cursor:grab;box-shadow:0 0 6px rgba(0,0,0,0.7);"></div>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9]
+    }),
+    zIndexOffset: 2000
+  });
+
+  handle.on('drag', evt => {
+    const ll = evt.latlng;
+    const dLat = ll.lat - origC[0];
+    const dLng = ll.lng - origC[1];
+    g.polygonLayer.setLatLngs(origPoly.map(p => [p[0] + dLat, p[1] + dLng]));
+  });
+
+  handle.on('dragend', evt => {
+    let lat = evt.target.getLatLng().lat;
+    let lng = evt.target.getLatLng().lng;
+
+    if (snapEnabled) {
+      [lat, lng] = findBestSnap(origPoly, lat, lng, origC[0], origC[1], g.id);
+    }
+
+    const dLat = lat - origC[0];
+    const dLng = lng - origC[1];
+    const finalPoly = origPoly.map(p => [p[0] + dLat, p[1] + dLng]);
+
+    g.polygon = finalPoly;
+    g.polygonLayer.setLatLngs(finalPoly);
+    g.flaeche = polygonAreaM2(finalPoly);
+    handle.setLatLng([lat, lng]);
+
+    // Update originals so subsequent drags work correctly
+    origC[0] = lat; origC[1] = lng;
+    origPoly.splice(0, origPoly.length, ...finalPoly);
+
+    renderList();
+    autosave();
+  });
+
+  handle.addTo(map);
+  moveHandles[g.id] = handle;
+}
+
+function activateMoveHandles() {
+  gebaeude.forEach(g => { if (g.polygon && g.polygonLayer) addMoveHandle(g); });
+}
+
+function deactivateMoveHandles() {
+  Object.values(moveHandles).forEach(h => map.removeLayer(h));
+  moveHandles = {};
+}
+
+function toggleMoveMode() {
+  if (isMoveMode) {
+    isMoveMode = false;
+    deactivateMoveHandles();
+    document.getElementById('btn-move-toggle').classList.remove('active');
+    hideHint();
+  } else {
+    hidePanels(); // closes other panels; isMoveMode is still false so no loop
+    isMoveMode = true;
+    document.getElementById('btn-move-toggle').classList.add('active');
+    activateMoveHandles();
+    showHint('Orangenen Kreis ziehen, um Gebäude zu verschieben. Einrasten an Ecken & Kanten aktiv. [Esc] zum Beenden.');
+  }
+}
+
+function toggleSnap() {
+  snapEnabled = !snapEnabled;
+  const btn = document.getElementById('btn-snap-toggle');
+  btn.style.opacity = snapEnabled ? '1' : '0.45';
+  btn.title = snapEnabled ? 'Einrasten: An' : 'Einrasten: Aus';
 }
 
 // ── Straßen-Layer ─────────────────────────────────────────────────────────
