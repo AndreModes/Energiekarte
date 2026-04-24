@@ -49,6 +49,13 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
 .tool-btn.cyan{border-color:#00bcd4;color:#80deea;}
 .tool-btn.cyan:hover{background:#006064;}
 .tool-btn.cyan.active{background:#00bcd4;color:#000;}
+.tool-dropdown{position:relative;display:inline-flex;}
+.tool-dropdown-menu{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9100;
+  background:var(--surface2);border:1px solid var(--border);border-radius:10px;
+  padding:6px;min-width:180px;flex-direction:column;gap:3px;
+  box-shadow:0 6px 20px rgba(0,0,0,.55);}
+.tool-dropdown-menu.open{display:flex;}
+.tool-dropdown-menu .tool-btn{width:100%;justify-content:flex-start;border-radius:8px;}
 .tool-btn.loading{border-color:var(--muted);color:var(--muted);pointer-events:none;}
 .spinner{width:11px;height:11px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;display:none;}
 .tool-btn.loading .spinner{display:block;}
@@ -534,33 +541,49 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
     <button class="tool-btn green" id="osm-btn" onclick="showOsmPanel()">
       <span class="t-icon">↓</span><div class="spinner"></div> OSM
     </button>
-    <button class="tool-btn green" id="btn-parametric-toggle" onclick="toggleParametricPanel()" title="Gebäude parametrisch platzieren">
-      <span class="t-icon">📐</span> Platzieren
-    </button>
-    <button class="tool-btn" id="btn-strassen-toggle" onclick="toggleStrassenPanel()" title="Straßen zeichnen" style="border-color:#607d8b;color:#90a4ae;">
-      <span class="t-icon">🛣</span> Straßen
-    </button>
-    <button class="tool-btn amber" id="btn-bem-toggle" onclick="toggleBemPanel()" title="Bemaßungslinien messen">
-      <span class="t-icon">📏</span> Messen
-    </button>
-    <button class="tool-btn" id="btn-flaechen-toggle" onclick="toggleFlaechenPanel()" title="Flächen zeichnen" style="border-color:#388e3c;color:#81c784;">
-      <span class="t-icon">⬛</span> Flächen
-    </button>
-    <button class="tool-btn" id="btn-besch-toggle" onclick="toggleBeschriftungenPanel()" title="Beschriftungen setzen" style="border-color:#ce93d8;color:#ce93d8;">
-      <span class="t-icon">🏷</span> Labels
-    </button>
-    <button class="tool-btn" id="btn-array-toggle" onclick="toggleArrayPanel()" title="Gebäude-Array – Reihe duplizieren" style="border-color:#7e57c2;color:#b39ddb;">
-      <span class="t-icon">⊞</span> Array
-    </button>
-    <button class="tool-btn amber" id="btn-pv-toggle" onclick="togglePvPanel()" title="PV-Potenzial-Analyse">
-      <span class="t-icon">☀</span> PV
-    </button>
-    <button class="tool-btn" id="btn-move-toggle" onclick="toggleMoveMode()" title="Gebäude verschieben" style="border-color:#ff9800;color:#ffb74d;">
-      <span class="t-icon">✋</span> Bewegen
-    </button>
-    <button class="tool-btn" id="btn-snap-toggle" onclick="toggleSnap()" title="Einrasten: An" style="border-color:#ff9800;color:#ffb74d;">
-      🔲 Einrasten
-    </button>
+    <!-- Dropdown: Gebäude-Werkzeuge -->
+    <div class="tool-dropdown">
+      <button class="tool-btn green" id="btn-gebaeude-dropdown" onclick="toggleDropdown('dd-gebaeude',event)" title="Gebäude-Werkzeuge">
+        <span class="t-icon">🏗</span> Gebäude ▾
+      </button>
+      <div class="tool-dropdown-menu" id="dd-gebaeude">
+        <button class="tool-btn green" id="btn-parametric-toggle" onclick="toggleParametricPanel()" title="Gebäude parametrisch platzieren">
+          <span class="t-icon">📐</span> Platzieren
+        </button>
+        <button class="tool-btn" id="btn-array-toggle" onclick="toggleArrayPanel()" title="Gebäude-Array – Reihe duplizieren" style="border-color:#7e57c2;color:#b39ddb;">
+          <span class="t-icon">⊞</span> Array
+        </button>
+        <button class="tool-btn" id="btn-move-toggle" onclick="toggleMoveMode()" title="Gebäude verschieben" style="border-color:#ff9800;color:#ffb74d;">
+          <span class="t-icon">✋</span> Bewegen
+        </button>
+        <button class="tool-btn" id="btn-snap-toggle" onclick="toggleSnap()" title="Einrasten: An" style="border-color:#ff9800;color:#ffb74d;">
+          🔲 Einrasten
+        </button>
+        <button class="tool-btn amber" id="btn-pv-toggle" onclick="togglePvPanel()" title="PV-Potenzial-Analyse (Dächer)">
+          <span class="t-icon">☀</span> PV-Potenzial
+        </button>
+      </div>
+    </div>
+    <!-- Dropdown: Zeichnen-Werkzeuge -->
+    <div class="tool-dropdown">
+      <button class="tool-btn" id="btn-zeichnen-dropdown" onclick="toggleDropdown('dd-zeichnen',event)" title="Zeichnen-Werkzeuge" style="border-color:#607d8b;color:#90a4ae;">
+        <span class="t-icon">✏</span> Zeichnen ▾
+      </button>
+      <div class="tool-dropdown-menu" id="dd-zeichnen">
+        <button class="tool-btn" id="btn-strassen-toggle" onclick="toggleStrassenPanel()" title="Straßen zeichnen" style="border-color:#607d8b;color:#90a4ae;">
+          <span class="t-icon">🛣</span> Straßen
+        </button>
+        <button class="tool-btn amber" id="btn-bem-toggle" onclick="toggleBemPanel()" title="Bemaßungslinien messen">
+          <span class="t-icon">📏</span> Messen
+        </button>
+        <button class="tool-btn" id="btn-flaechen-toggle" onclick="toggleFlaechenPanel()" title="Flächen zeichnen" style="border-color:#388e3c;color:#81c784;">
+          <span class="t-icon">⬛</span> Flächen
+        </button>
+        <button class="tool-btn" id="btn-besch-toggle" onclick="toggleBeschriftungenPanel()" title="Beschriftungen setzen" style="border-color:#ce93d8;color:#ce93d8;">
+          <span class="t-icon">🏷</span> Labels
+        </button>
+      </div>
+    </div>
     <button class="tool-btn" id="btn-tile" onclick="toggleTile()" style="border-color:#607d8b;color:#90a4ae;">🛰</button>
   </div>
 </header>
@@ -756,6 +779,13 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
             onclick="elTogglePvaAnalyse()">
             <span>☀</span> PV-Auslegungsanalyse
           </button>
+          <button id="btn-pv-flaeche" class="elko-mode-btn" style="border-color:#f9a825;color:#ffee58;"
+            onclick="togglePvFlaecheMode()">
+            <span>⬛</span> Freiflächen-PV einzeichnen
+          </button>
+          <div style="font-size:10px;color:var(--muted);padding:2px 4px;">
+            ≈ 100 Wp/m² Grundfläche · Doppelklick zum Abschließen
+          </div>
           <div id="sz-aktiv-badge" style="display:none;margin-top:2px;padding:4px 8px;
                background:rgba(179,157,219,.12);border-radius:4px;border-left:3px solid #b39ddb;
                font-size:10px;color:var(--text);line-height:1.4;">
@@ -1374,6 +1404,15 @@ const FLAECHEN_TYPEN = {
   sonstiges: { label: 'Sonstiges',    farbe: '#757575', rand: '#424242', opacity: 0.25 },
 };
 
+// ── Freiflächen-PV ────────────────────────────────────────────────────────
+let pvFlaechen = [];
+let pvFlaecheIdCounter = 1;
+let isDrawingPvFlaeche = false;
+let pvFlaechePunkte = [];
+let pvFlaechePolyline = null;
+let pvFlaecheStartMarker = null;
+let pvFlaechenLayerGroup = null;
+
 // ── Beschriftungen ────────────────────────────────────────────────────────
 let beschriftungen = [];
 let beschriftungIdCounter = 1;
@@ -1564,6 +1603,79 @@ let currentTile = 'osm';
 function toggleTile(){
   if(currentTile==='osm'){ map.removeLayer(osmTile); esriTile.addTo(map); currentTile='esri'; document.getElementById('btn-tile').textContent='🗺 OSM'; }
   else { map.removeLayer(esriTile); osmTile.addTo(map); currentTile='osm'; document.getElementById('btn-tile').textContent='🛰 Satellit'; }
+}
+
+// ── Toolbar-Dropdowns ─────────────────────────────────────────────────────
+function toggleDropdown(id, event) {
+  if (event) event.stopPropagation();
+  const menu = document.getElementById(id);
+  const isOpen = menu.classList.contains('open');
+  document.querySelectorAll('.tool-dropdown-menu.open').forEach(m => m.classList.remove('open'));
+  if (!isOpen) menu.classList.add('open');
+}
+document.addEventListener('click', () => {
+  document.querySelectorAll('.tool-dropdown-menu.open').forEach(m => m.classList.remove('open'));
+});
+
+// ── Freiflächen-PV ────────────────────────────────────────────────────────
+function togglePvFlaecheMode() {
+  if (isDrawingPvFlaeche) { pvFlaecheCancel(); return; }
+  hidePanels();
+  isDrawingPvFlaeche = true;
+  document.getElementById('btn-pv-flaeche').classList.add('active');
+  map.getContainer().style.cursor = 'crosshair';
+  showHint('Eckpunkte der PV-Freifläche anklicken. Startpunkt erneut anklicken oder Doppelklick zum Abschließen. [Esc] Abbrechen.');
+}
+
+function pvFlaecheCancel() {
+  isDrawingPvFlaeche = false;
+  const btn = document.getElementById('btn-pv-flaeche');
+  if (btn) btn.classList.remove('active');
+  pvFlaechePunkte = [];
+  if (pvFlaechePolyline) { map.removeLayer(pvFlaechePolyline); pvFlaechePolyline = null; }
+  if (pvFlaecheStartMarker) { map.removeLayer(pvFlaecheStartMarker); pvFlaecheStartMarker = null; }
+  map.getContainer().style.cursor = '';
+  hideHint();
+}
+
+function pvFlaecheFinish() {
+  if (pvFlaechePunkte.length < 3) { pvFlaecheCancel(); return; }
+
+  const id = pvFlaecheIdCounter++;
+  const flaeche = polygonAreaM2(pvFlaechePunkte);
+  const kwp = Math.round(flaeche * 0.10 * 10) / 10; // 100 Wp/m² Grundfläche
+
+  let cLat = 0, cLng = 0;
+  pvFlaechePunkte.forEach(p => { cLat += p.lat; cLng += p.lng; });
+  cLat /= pvFlaechePunkte.length;
+  cLng /= pvFlaechePunkte.length;
+
+  // Ertrag: Südausrichtung 180°, 20° Neigung
+  const spez   = (typeof pvSpezErtrag  === 'function') ? pvSpezErtrag(cLat)       : 950;
+  const korr   = (typeof pvKorrFaktor  === 'function') ? pvKorrFaktor(180, 20)     : 0.97;
+  const ertrag = Math.round(kwp * spez * korr);
+  const co2    = Math.round(ertrag * 0.38);
+
+  if (!pvFlaechenLayerGroup) pvFlaechenLayerGroup = L.layerGroup().addTo(map);
+  const layer = L.polygon(pvFlaechePunkte, {
+    color: '#f9a825', fillColor: '#ffee58', fillOpacity: 0.28, weight: 2
+  }).addTo(pvFlaechenLayerGroup);
+  layer.bindPopup(
+    `<b>Freiflächen-PV ${id}</b><br>` +
+    `${Math.round(flaeche).toLocaleString('de')} m² · <b>${kwp} kWp</b><br>` +
+    `~${ertrag.toLocaleString('de')} kWh/a · ${co2.toLocaleString('de')} kg CO₂/a gespart`
+  );
+
+  const asset = elCreateAsset('PV', cLat, cLng, {
+    name: 'Freiflächen-PV ' + id,
+    props: { leistungKWp: kwp }
+  });
+
+  pvFlaechen.push({ id, punkte: [...pvFlaechePunkte], flaeche, kwp, ertrag, co2, assetId: asset?.id, layer });
+
+  pvFlaecheCancel();
+  if (typeof elCalc === 'function' && EL.assets.length > 0) elCalc();
+  autosave();
 }
 
 document.getElementById('map').addEventListener('contextmenu', e => e.preventDefault());
@@ -2646,6 +2758,23 @@ map.on('click',e=>{
     showHint('Label gesetzt. Weiteres Klicken platziert weitere Labels. [Esc] zum Beenden.');
     return;
   }
+  if (isDrawingPvFlaeche) {
+    const pt = { lat: e.latlng.lat, lng: e.latlng.lng };
+    if (pvFlaechePunkte.length > 0) {
+      const first = pvFlaechePunkte[0];
+      if (Math.hypot(pt.lat - first.lat, pt.lng - first.lng) < 0.00005 && pvFlaechePunkte.length >= 3) {
+        pvFlaecheFinish(); return;
+      }
+    }
+    if (pvFlaechePunkte.length === 0) {
+      pvFlaecheStartMarker = L.circleMarker(e.latlng, { radius: 7, color: '#f9a825', fillColor: '#ffee58', fillOpacity: 1, weight: 2 })
+        .addTo(map).on('click', ev => { L.DomEvent.stopPropagation(ev); pvFlaecheFinish(); });
+    }
+    pvFlaechePunkte.push(pt);
+    if (pvFlaechePolyline) map.removeLayer(pvFlaechePolyline);
+    pvFlaechePolyline = L.polygon(pvFlaechePunkte, { color: '#f9a825', fillColor: '#ffee58', fillOpacity: 0.15, weight: 2, dashArray: '6 4' }).addTo(map);
+    return;
+  }
   if (isDrawingFlaeche) {
     if (flaecheDrawPunkte.length > 0) {
       const first = flaecheDrawPunkte[0];
@@ -2696,7 +2825,14 @@ map.on('click',e=>{
       renderRaumprogrammList();
       renderList();
     }
-    cancelParametricPlace();
+    // Auto-create a linked electrical consumer asset at the building centroid
+    elCreateAsset('Verbraucher', e.latlng.lat, e.latlng.lng, {
+      buildingId: newG.id,
+      name: (newG.name || 'Gebäude') + ' (Verbraucher)',
+      baujahr: newG.baujahr
+    });
+    // Stay in placement mode — user can press Esc to exit
+    showHint('Klicke auf die Karte, um das nächste Gebäude zu platzieren. [Esc] zum Abbrechen.');
     return;
   }
   if (isDrawingStrasse) {
@@ -2735,6 +2871,11 @@ map.on('click',e=>{
 });
 
 map.on('contextmenu', e => {
+  if(isDrawingPvFlaeche) {
+    if (pvFlaechePunkte.length >= 3) pvFlaecheFinish();
+    else pvFlaecheCancel();
+    return;
+  }
   if(isDrawingFlaeche) {
     if (flaecheDrawPunkte.length >= 3) flaecheFinish();
     else flaecheCancel();
@@ -2765,6 +2906,7 @@ map.on('contextmenu', e => {
 map.on('dblclick',e=>{
   L.DomEvent.stopPropagation(e);
   L.DomEvent.preventDefault(e);
+  if(isDrawingPvFlaeche && pvFlaechePunkte.length >= 3) { pvFlaecheFinish(); return; }
   if(isDrawingFlaeche && flaecheDrawPunkte.length >= 3) { flaecheFinish(); return; }
   if(isDrawingStrasse && strasseDrawPunkte.length >= 2) { strasseFinish(); return; }
   if(isDrawingRiver && riverPoints.length >= 2) { finishDrawRiver(); return; }
@@ -2790,6 +2932,7 @@ map.on('zoomend', function() {
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
     if (isMoveMode) toggleMoveMode();
+    if (isDrawingPvFlaeche) pvFlaecheCancel();
     if (isPlacingParametric) cancelParametricPlace();
     if (isDrawingFlaeche) flaecheCancel();
     if (isDrawingStrasse) strasseCancel();
@@ -3288,6 +3431,7 @@ function hidePanels(){
   document.getElementById('btn-array-toggle').classList.remove('active');
   document.getElementById('btn-pv-toggle').classList.remove('active');
   if (isMoveMode) { isMoveMode = false; deactivateMoveHandles(); document.getElementById('btn-move-toggle').classList.remove('active'); hideHint(); }
+  if (isDrawingPvFlaeche) pvFlaecheCancel();
   if (isPlacingLwWp) togglePlaceLwWp();
   if (isPlacingParametric) cancelParametricPlace();
   if (isDrawingFlaeche) flaecheCancel();
@@ -17431,6 +17575,10 @@ function cancelParametricPlace() {
 
 // ── Gebäude verschieben & einrasten ──────────────────────────────────────
 
+function ptArr(p) {
+  return Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lng];
+}
+
 function distM(lat1, lng1, lat2, lng2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -17441,14 +17589,15 @@ function distM(lat1, lng1, lat2, lng2) {
 
 function getPolyCentroid(poly) {
   let lat = 0, lng = 0;
-  poly.forEach(p => { lat += p[0]; lng += p[1]; });
+  poly.forEach(p => { const a = ptArr(p); lat += a[0]; lng += a[1]; });
   return [lat / poly.length, lng / poly.length];
 }
 
 function edgeMidpoints(corners) {
   return corners.map((c, i) => {
-    const n = corners[(i + 1) % corners.length];
-    return [(c[0] + n[0]) / 2, (c[1] + n[1]) / 2];
+    const a = ptArr(c);
+    const b = ptArr(corners[(i + 1) % corners.length]);
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   });
 }
 
@@ -17462,7 +17611,7 @@ function snapThresholdM() {
 function findBestSnap(origPoly, candidateLat, candidateLng, origCLat, origCLng, excludeId) {
   const dLat = candidateLat - origCLat;
   const dLng = candidateLng - origCLng;
-  const movedCorners = origPoly.map(p => [p[0] + dLat, p[1] + dLng]);
+  const movedCorners = origPoly.map(p => { const a = ptArr(p); return [a[0] + dLat, a[1] + dLng]; });
   const movingPts = [...movedCorners, ...edgeMidpoints(movedCorners)];
 
   let bestDist = snapThresholdM();
@@ -17470,7 +17619,8 @@ function findBestSnap(origPoly, candidateLat, candidateLng, origCLat, origCLng, 
 
   gebaeude.forEach(g => {
     if (g.id === excludeId || !g.polygon) return;
-    const targetPts = [...g.polygon, ...edgeMidpoints(g.polygon)];
+    const normPoly = g.polygon.map(ptArr);
+    const targetPts = [...normPoly, ...edgeMidpoints(normPoly)];
     movingPts.forEach(mp => {
       targetPts.forEach(tp => {
         const d = distM(mp[0], mp[1], tp[0], tp[1]);
@@ -17488,7 +17638,7 @@ function findBestSnap(origPoly, candidateLat, candidateLng, origCLat, origCLng, 
 
 function addMoveHandle(g) {
   const c = getPolyCentroid(g.polygon);
-  const origPoly = g.polygon.map(p => [...p]);
+  const origPoly = g.polygon.map(ptArr);
   const origC = [c[0], c[1]];
 
   const handle = L.marker([c[0], c[1]], {
@@ -17519,7 +17669,8 @@ function addMoveHandle(g) {
 
     const dLat = lat - origC[0];
     const dLng = lng - origC[1];
-    const finalPoly = origPoly.map(p => [p[0] + dLat, p[1] + dLng]);
+    // Store as {lat,lng} objects — the convention used by polygonCenter, polygonAreaM2, etc.
+    const finalPoly = origPoly.map(p => ({ lat: p[0] + dLat, lng: p[1] + dLng }));
 
     g.polygon = finalPoly;
     g.polygonLayer.setLatLngs(finalPoly);
@@ -17528,7 +17679,7 @@ function addMoveHandle(g) {
 
     // Update originals so subsequent drags work correctly
     origC[0] = lat; origC[1] = lng;
-    origPoly.splice(0, origPoly.length, ...finalPoly);
+    origPoly.splice(0, origPoly.length, ...finalPoly.map(ptArr));
 
     renderList();
     autosave();
