@@ -2821,9 +2821,25 @@ map.on('click',e=>{
       if (rpEntry.heizlast)  newG.heizlast = rpEntry.heizlast;
       if (!newG.waerme && newG.baujahr) calcAutoEnergy(newG);
       rpEntry.placed = true;
-      parametricRpId = null;
       renderRaumprogrammList();
       renderList();
+      const nextRp = raumprogramm.find(x => !x.placed);
+      if (nextRp) {
+        parametricWidth    = nextRp.breite;
+        parametricLength   = nextRp.laenge;
+        parametricRotation = nextRp.drehung;
+        parametricRpId     = nextRp.id;
+        const pw = document.getElementById('param-width');
+        const pl = document.getElementById('param-length');
+        const pr = document.getElementById('param-rotation');
+        const pa = document.getElementById('param-area-disp');
+        if (pw) pw.value = nextRp.breite;
+        if (pl) pl.value = nextRp.laenge;
+        if (pr) pr.value = nextRp.drehung;
+        if (pa) pa.textContent = Math.round(nextRp.breite * nextRp.laenge) + ' m²';
+      } else {
+        parametricRpId = null;
+      }
     }
     // Auto-create a linked electrical consumer asset at the building centroid
     elCreateAsset('Verbraucher', e.latlng.lat, e.latlng.lng, {
@@ -2831,8 +2847,15 @@ map.on('click',e=>{
       name: (newG.name || 'Gebäude') + ' (Verbraucher)',
       baujahr: newG.baujahr
     });
-    // Stay in placement mode — user can press Esc to exit
-    showHint('Klicke auf die Karte, um das nächste Gebäude zu platzieren. [Esc] zum Abbrechen.');
+    // Update hint based on next state
+    if (parametricRpId !== null) {
+      const nextRp2 = raumprogramm.find(x => x.id === parametricRpId);
+      showHint(`Nächstes Gebäude: „${nextRp2 ? nextRp2.name : ''}" – auf Karte klicken. [Esc] Abbrechen.`);
+    } else if (rpEntry) {
+      showHint('Alle Gebäude aus der Liste platziert. [Esc] zum Beenden.');
+    } else {
+      showHint('Klicke auf die Karte, um das nächste Gebäude zu platzieren. [Esc] zum Abbrechen.');
+    }
     return;
   }
   if (isDrawingStrasse) {
