@@ -1761,7 +1761,8 @@ function getComputedStats(g, year) {
       status = 'saniert';
   }
   
-  return { waerme, spez: currentSpez, heizlast, spezHeizlast, status };
+  const r1 = v => v ? Math.round(v * 10) / 10 : v;
+  return { waerme: r1(waerme), spez: r1(currentSpez), heizlast: r1(heizlast), spezHeizlast: r1(spezHeizlast), status };
 }
 
 function rgbToHex(r, g, b) {
@@ -5327,7 +5328,7 @@ function setNutzung(id, nutzung) {
       }
     }
   }
-  updateViz(); updateTotals();
+  updateViz(); updateTotals(); renderList();
 }
 
 // ── Gebäude-Auswahl & Massenbearbeitung ──────────────────────────────
