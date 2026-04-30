@@ -228,7 +228,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
 .geb-filter-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:11px;padding:4px 8px;outline:none;transition:.15s;}
 .geb-filter-input:focus{border-color:var(--accent);}
 /* Nutzungstyp badge */
-.nutzung-select{background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--muted);font-family:inherit;font-size:10px;padding:2px 4px;cursor:pointer;outline:none;transition:.15s;max-width:120px;}
+.nutzung-select{background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--muted);font-family:inherit;font-size:10px;padding:2px 4px;cursor:pointer;outline:none;transition:.15s;max-width:160px;}
 .nutzung-select:focus{border-color:var(--accent);}
 /* Massenbearbeitung */
 .bulk-bar{padding:5px 6px;background:var(--surface2);border-bottom:1px solid var(--border);display:none;gap:4px;flex-wrap:wrap;align-items:center;}
@@ -2821,9 +2821,25 @@ map.on('click',e=>{
       if (rpEntry.heizlast)  newG.heizlast = rpEntry.heizlast;
       if (!newG.waerme && newG.baujahr) calcAutoEnergy(newG);
       rpEntry.placed = true;
-      parametricRpId = null;
       renderRaumprogrammList();
       renderList();
+      const nextRp = raumprogramm.find(x => !x.placed);
+      if (nextRp) {
+        parametricWidth    = nextRp.breite;
+        parametricLength   = nextRp.laenge;
+        parametricRotation = nextRp.drehung;
+        parametricRpId     = nextRp.id;
+        const pw = document.getElementById('param-width');
+        const pl = document.getElementById('param-length');
+        const pr = document.getElementById('param-rotation');
+        const pa = document.getElementById('param-area-disp');
+        if (pw) pw.value = nextRp.breite;
+        if (pl) pl.value = nextRp.laenge;
+        if (pr) pr.value = nextRp.drehung;
+        if (pa) pa.textContent = Math.round(nextRp.breite * nextRp.laenge) + ' m²';
+      } else {
+        parametricRpId = null;
+      }
     }
     // Auto-create a linked electrical consumer asset at the building centroid
     elCreateAsset('Verbraucher', e.latlng.lat, e.latlng.lng, {
@@ -2831,8 +2847,15 @@ map.on('click',e=>{
       name: (newG.name || 'Gebäude') + ' (Verbraucher)',
       baujahr: newG.baujahr
     });
-    // Stay in placement mode — user can press Esc to exit
-    showHint('Klicke auf die Karte, um das nächste Gebäude zu platzieren. [Esc] zum Abbrechen.');
+    // Update hint based on next state
+    if (parametricRpId !== null) {
+      const nextRp2 = raumprogramm.find(x => x.id === parametricRpId);
+      showHint(`Nächstes Gebäude: „${nextRp2 ? nextRp2.name : ''}" – auf Karte klicken. [Esc] Abbrechen.`);
+    } else if (rpEntry) {
+      showHint('Alle Gebäude aus der Liste platziert. [Esc] zum Beenden.');
+    } else {
+      showHint('Klicke auf die Karte, um das nächste Gebäude zu platzieren. [Esc] zum Abbrechen.');
+    }
     return;
   }
   if (isDrawingStrasse) {
@@ -4398,18 +4421,7 @@ function renderList(){
         ${infoLabel}
         <div class="geb-badge ${badgeClass}" style="margin-left:${infoLabel?'5px':'auto'}">${badgeText}</div>
       </div>
-      <div style="margin-bottom:5px;">
-        <select class="nutzung-select" onchange="setNutzung(${g.id},this.value)" title="Nutzungstyp">
-          <option value="">Nutzungstyp…</option>
-          <option value="efh"  ${g.nutzung==='efh'?'selected':''}>EFH</option>
-          <option value="mfh"  ${g.nutzung==='mfh'?'selected':''}>MFH</option>
-          <option value="ghd"  ${g.nutzung==='ghd'?'selected':''}>GHD</option>
-          <option value="schule" ${g.nutzung==='schule'?'selected':''}>Schule</option>
-          <option value="buero" ${g.nutzung==='buero'?'selected':''}>Büro</option>
-          <option value="industrie" ${g.nutzung==='industrie'?'selected':''}>Industrie</option>
-          <option value="oeffentlich" ${g.nutzung==='oeffentlich'?'selected':''}>Öffentlich</option>
-        </select>
-      </div>
+      <div style="margin-bottom:5px;">${nutzungSelectHtml(g.id, g.nutzung)}</div>
       <div class="geb-inputs" style="grid-template-columns: 1fr 1fr; row-gap: 6px; opacity: ${stats.status==='abgerissen'||stats.status==='geplant'?0.4:1}">
         <div class="inp-group">
           <div class="inp-label">Wärme MWh/a (Bestand)</div>
@@ -4454,6 +4466,7 @@ function renderList(){
             oninput="updateField(${g.id},'flaeche',this.value)"/>
         </div>
       </div>
+      ${renderElBedarfRow(g)}
       <div class="geb-actions">
         <button class="btn-xs blue" onclick="startDraw(${g.id})">&#9998; ${g.polygon ? 'Neu' : 'Zeichnen'}</button>
         ${g.polygon ? '<button class="btn-xs purple" onclick="flyTo(' + g.id + ')">&#8982;</button>' : ''}
@@ -4521,7 +4534,9 @@ function exportJSON(){
       baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen,
       huelle: g.huelle || null,
       pv: g.pv || null,
-      feldBericht: g.feldBericht || null
+      feldBericht: g.feldBericht || null,
+      elAnschluss: g.elAnschluss || null,
+      elKwhA: g.elKwhA || null,
     })),
     netz: {
       zentrale: document.getElementById('netz-zentrale').value,
@@ -5247,15 +5262,44 @@ animatePipes();
 
 
 // ── Nutzungstyp default-Kennwerte ────────────────────────────────────
+// spez/spezHL: Wärme (kWh/m²a, W/m²) · spezEl/spezElHL: Strom (kWh/m²a, W/m²) je NFA
+// guete: Verlässlichkeit der m²-Schätzung: 'hoch' | 'mittel' | 'gering'
+// bw: true = Bundeswehr-Typus
 const NUTZUNG_DEFAULTS = {
-  efh:        { spez: 180, spezHL: 80,  label: 'EFH' },
-  mfh:        { spez: 120, spezHL: 60,  label: 'MFH' },
-  ghd:        { spez: 100, spezHL: 50,  label: 'GHD' },
-  schule:     { spez: 80,  spezHL: 40,  label: 'Schule' },
-  buero:      { spez: 90,  spezHL: 45,  label: 'Büro' },
-  industrie:  { spez: 200, spezHL: 100, label: 'Industrie' },
-  oeffentlich:{ spez: 110, spezHL: 55,  label: 'Öffentlich' },
+  // ── Allgemein ───────────────────────────────────────────────────────
+  efh:            { spez:180, spezHL:80,  spezEl:30,  spezElHL:8,   guete:'hoch',   label:'EFH' },
+  mfh:            { spez:120, spezHL:60,  spezEl:25,  spezElHL:6,   guete:'hoch',   label:'MFH' },
+  ghd:            { spez:100, spezHL:50,  spezEl:60,  spezElHL:25,  guete:'mittel', label:'GHD' },
+  schule:         { spez:80,  spezHL:40,  spezEl:20,  spezElHL:10,  guete:'hoch',   label:'Schule' },
+  buero:          { spez:90,  spezHL:45,  spezEl:50,  spezElHL:20,  guete:'hoch',   label:'Büro' },
+  industrie:      { spez:200, spezHL:100, spezEl:120, spezElHL:50,  guete:'mittel', label:'Industrie' },
+  oeffentlich:    { spez:110, spezHL:55,  spezEl:40,  spezElHL:15,  guete:'hoch',   label:'Öffentlich' },
+  // ── Bundeswehr ─────────────────────────────────────────────────────
+  bw_unterkunft:  { spez:100, spezHL:50,  spezEl:35,  spezElHL:10,  guete:'hoch',   bw:true, label:'Unterkunft/Kaserne' },
+  bw_verwaltung:  { spez:90,  spezHL:45,  spezEl:50,  spezElHL:20,  guete:'hoch',   bw:true, label:'Verwaltung' },
+  bw_ausbildung:  { spez:80,  spezHL:40,  spezEl:20,  spezElHL:10,  guete:'hoch',   bw:true, label:'Ausbildungsgebäude' },
+  bw_kantine:     { spez:120, spezHL:60,  spezEl:80,  spezElHL:30,  guete:'mittel', bw:true, label:'Kantine/Speisesaal' },
+  bw_gkueche:     { spez:150, spezHL:80,  spezEl:400, spezElHL:200, guete:'gering', bw:true, label:'Großküche ⚠',
+    hint:'Leistung wird durch Küchengeräte bestimmt (Öfen, Dampfgarer, Spülmaschinen), nicht durch Fläche. Typisch: 40–150 kW je nach Portionszahl/Tag. Direkteingabe empfohlen.' },
+  bw_werkstatt:   { spez:150, spezHL:60,  spezEl:80,  spezElHL:40,  guete:'mittel', bw:true, label:'Werkstatt allg.' },
+  bw_kfz:         { spez:150, spezHL:60,  spezEl:150, spezElHL:80,  guete:'gering', bw:true, label:'KFZ-Werkstatt ⚠',
+    hint:'Leistung stark abhängig von Hebebühnen, Kompressoren und Prüfgeräten. Direkteingabe aus Ausschreibung oder Bestandsmessung empfohlen.' },
+  bw_halle:       { spez:50,  spezHL:25,  spezEl:15,  spezElHL:5,   guete:'hoch',   bw:true, label:'Fahrzeug-/Lagerhalle' },
+  bw_sport:       { spez:80,  spezHL:40,  spezEl:30,  spezElHL:20,  guete:'hoch',   bw:true, label:'Sporthalle' },
+  bw_sanitaet:    { spez:120, spezHL:55,  spezEl:80,  spezElHL:30,  guete:'mittel', bw:true, label:'Sanitätsgebäude' },
+  bw_waffenkammer:{ spez:50,  spezHL:20,  spezEl:10,  spezElHL:3,   guete:'hoch',   bw:true, label:'Waffenkammer/Lager' },
 };
+
+function nutzungSelectHtml(gId, currentVal) {
+  const std = Object.entries(NUTZUNG_DEFAULTS).filter(([,v]) => !v.bw);
+  const bw  = Object.entries(NUTZUNG_DEFAULTS).filter(([,v]) =>  v.bw);
+  const opt = ([k,v]) => `<option value="${k}"${currentVal===k?' selected':''}>${v.label}</option>`;
+  return `<select class="nutzung-select" onchange="setNutzung(${gId},this.value)" title="Nutzungstyp">
+    <option value="">Nutzungstyp…</option>
+    <optgroup label="Allgemein">${std.map(opt).join('')}</optgroup>
+    <optgroup label="Bundeswehr">${bw.map(opt).join('')}</optgroup>
+  </select>`;
+}
 
 function setNutzung(id, nutzung) {
   const g = gebaeude.find(x => x.id === id);
@@ -5424,7 +5468,8 @@ function autosave() {
         spez: g.spez, spezHeizlast: g.spezHeizlast, flaeche: g.flaeche,
         nutzung: g.nutzung, fromOsm: g.fromOsm, osmId: g.osmId,
         polygon: g.polygon, baujahr: g.baujahr, abrissjahr: g.abrissjahr,
-        sanierungen: g.sanierungen, huelle: g.huelle || null
+        sanierungen: g.sanierungen, huelle: g.huelle || null,
+        elAnschluss: g.elAnschluss || null, elKwhA: g.elKwhA || null,
       })),
       netz: {
         zentrale: document.getElementById('netz-zentrale').value,
@@ -5484,7 +5529,8 @@ function loadAutosave() {
         const newG = addGebaeude({ id: g.id, coords: g.polygon, name: g.name, fromOsm: g.fromOsm, osmId: g.osmId });
         Object.assign(newG, { waerme: g.waerme, heizlast: g.heizlast, spez: g.spez, spezHeizlast: g.spezHeizlast,
           flaeche: g.flaeche, nutzung: g.nutzung||'', baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen||[],
-          huelle: g.huelle||null, pv: g.pv||null, feldBericht: g.feldBericht||null });
+          huelle: g.huelle||null, pv: g.pv||null, feldBericht: g.feldBericht||null,
+          elAnschluss: g.elAnschluss||null, elKwhA: g.elKwhA||null });
         if (g.id >= idCounter) idCounter = g.id + 1;
       });
     }
@@ -17256,21 +17302,158 @@ function feldBerichtZustandLabel(z) {
   return '—';
 }
 
+const PV_DACHTYP_DEFAULTS = {
+  flach:  { label: 'Flachdach',  faktor: 0.30, neigung: 15, autoAz: false },
+  sattel: { label: 'Satteldach', faktor: 0.40, neigung: 35, autoAz: true  },
+  pult:   { label: 'Pultdach',   faktor: 0.50, neigung: 15, autoAz: true  },
+  walm:   { label: 'Walmdach',   faktor: 0.35, neigung: 35, autoAz: true  },
+};
+let pvGlobalParams = { m2perKwp: 6.0, co2: 380 };
+
 function pvCentroidLat(g) {
-  if (!g.polygon || !g.polygon.length) return 51;
+  if (!g.polygon || !g.polygon.length) return (typeof map !== 'undefined' ? map.getCenter().lat : 51);
   const lats = g.polygon.map(p => Array.isArray(p) ? p[0] : p.lat);
   return lats.reduce((a, b) => a + b, 0) / lats.length;
 }
 
 function pvCentroidLng(g) {
-  if (!g.polygon || !g.polygon.length) return 10;
+  if (!g.polygon || !g.polygon.length) return (typeof map !== 'undefined' ? map.getCenter().lng : 10);
   const lngs = g.polygon.map(p => Array.isArray(p) ? p[1] : p.lng);
   return lngs.reduce((a, b) => a + b, 0) / lngs.length;
+}
+
+function pvAutoAzimuth(g) {
+  if (!g.polygon || g.polygon.length < 3) return null;
+  const pts = g.polygon.map(p => Array.isArray(p) ? { lat: p[0], lng: p[1] } : p);
+  let maxLen = 0, mainDx = 0, mainDy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const cosLat = Math.cos(a.lat * Math.PI / 180);
+    const dx = (b.lng - a.lng) * cosLat;
+    const dy = b.lat - a.lat;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > maxLen) { maxLen = len; mainDx = dx; mainDy = dy; }
+  }
+  if (maxLen === 0) return null;
+  // Perpendicular to ridge, choosing the south-facing side (more negative dy)
+  const sfDx = mainDx >= 0 ?  mainDy : -mainDy;
+  const sfDy = mainDx >= 0 ? -mainDx :  mainDx;
+  // Convert to solar azimuth: 0=Süd, +90=West, −90=Ost
+  const az = Math.atan2(-sfDx, -sfDy) * 180 / Math.PI;
+  return Math.round(az);
 }
 
 function pvElAssetFuerGebaeude(gId) {
   const alle = typeof elGetMergedAssets === 'function' ? elGetMergedAssets() : (EL?.assets || []);
   return alle.find(a => a.type === 'PV' && a.buildingId === gId) || null;
+}
+
+function elVerbraucherFuerGebaeude(gId) {
+  const alle = typeof elGetMergedAssets === 'function' ? elGetMergedAssets() : (EL?.assets || []);
+  return alle.find(a => a.type === 'Verbraucher' && a.buildingId === gId) || null;
+}
+
+// NFA = BGF × Stockwerke × 0.8 (konsistent mit Wärmeberechnung)
+function calcElBedarf(g) {
+  const manKw   = g.elAnschluss != null && g.elAnschluss !== '' ? parseFloat(g.elAnschluss) : null;
+  const manKwha = g.elKwhA      != null && g.elKwhA      !== '' ? parseFloat(g.elKwhA)      : null;
+  if (manKw !== null) {
+    return { nfa:null, jahresenergie:manKwha, anschluss:manKw,
+             spezEl:null, spezElHL:null, guete:'manuell', hint:null, manuell:true };
+  }
+  if (!g.flaeche || !g.nutzung) return null;
+  const def = NUTZUNG_DEFAULTS[g.nutzung];
+  if (!def || !def.spezEl) return null;
+  const nfa           = g.flaeche * (g.stockwerke || 1) * 0.8;
+  const jahresenergie = Math.round(nfa * def.spezEl  / 100) / 10;
+  const anschluss     = Math.round(nfa * def.spezElHL / 100) / 10;
+  return { nfa:Math.round(nfa), jahresenergie, anschluss,
+           spezEl:def.spezEl, spezElHL:def.spezElHL,
+           guete:def.guete||'hoch', hint:def.hint||null, manuell:false };
+}
+
+function updateElAnschluss(id, field, value) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  const v = value === '' ? null : value;
+  if (field === 'anschluss') g.elAnschluss = v;
+  if (field === 'kwha')      g.elKwhA      = v;
+  renderList();
+}
+
+function renderElBedarfRow(g) {
+  const r = calcElBedarf(g);
+  if (!r) return '';
+  const vb    = elVerbraucherFuerGebaeude(g.id);
+  const vbKw  = vb ? (parseFloat(vb.props?.leistungKW) || 0) : null;
+  const match = vb && Math.abs(vbKw - r.anschluss) < 0.2;
+  const assetCol = vb ? (match ? '#4caf50' : '#f9a825') : 'var(--muted)';
+  const assetTxt = vb ? (match ? `✓ ${vbKw} kW` : `Asset: ${vbKw} kW`) : 'kein Asset';
+
+  const gueteBadge = r.manuell
+    ? `<span style="font-size:8px;background:#1b2a3a;color:#4fc3f7;border-radius:2px;padding:1px 5px;">Manuell</span>`
+    : r.guete === 'hoch'
+      ? `<span style="font-size:8px;background:#1b3a2a;color:#4caf50;border-radius:2px;padding:1px 5px;">±20%</span>`
+      : r.guete === 'mittel'
+        ? `<span style="font-size:8px;background:#2a2010;color:#f9a825;border-radius:2px;padding:1px 5px;">orientierend</span>`
+        : `<span style="font-size:8px;background:#2a1010;color:#e53935;border-radius:2px;padding:1px 5px;">⚠ ungenau</span>`;
+
+  const kwhaTxt = r.jahresenergie !== null ? `&nbsp;·&nbsp;${r.jahresenergie} MWh/a` : '';
+  const hintHtml = !r.manuell && r.guete === 'gering' && r.hint
+    ? `<div style="font-size:9px;color:#ef9a9a;margin-top:3px;line-height:1.4;">⚠ ${r.hint}</div>` : '';
+
+  return `<div style="margin-top:5px;background:var(--bg);border-radius:4px;padding:5px 8px;border-left:2px solid rgba(249,168,37,.5);">
+    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+      <span style="font-size:10px;color:#f9a825;">⚡</span>
+      <span style="font-size:9px;color:var(--muted);">El. Bedarf:</span>
+      <span style="font-size:10px;font-family:'DM Mono',monospace;">${r.anschluss} kW</span>
+      <span style="font-size:9px;color:var(--muted);">${kwhaTxt}</span>
+      ${gueteBadge}
+      <span style="font-size:9px;color:${assetCol};margin-left:2px;">${assetTxt}</span>
+      <button class="btn-xs" onclick="elUebernehmenVerbraucher(${g.id})"
+        style="margin-left:auto;border-color:#f9a825;color:#f9a825;font-size:9px;flex-shrink:0;"
+        title="Leistung in verknüpften Verbraucher-Asset schreiben">→ Asset</button>
+    </div>
+    ${hintHtml}
+    <div style="display:flex;align-items:center;gap:4px;margin-top:4px;">
+      <span style="font-size:9px;color:var(--muted);white-space:nowrap;">Direkt kW:</span>
+      <input class="inp-field" type="number" min="0" step="0.5"
+        value="${g.elAnschluss || ''}" placeholder="—"
+        style="width:72px;font-size:10px;padding:2px 5px;"
+        oninput="updateElAnschluss(${g.id},'anschluss',this.value)"
+        title="Direkteingabe überschreibt Schätzwert (z.B. aus Messung oder Ausschreibung)"/>
+      <span style="font-size:9px;color:var(--muted);white-space:nowrap;">MWh/a:</span>
+      <input class="inp-field" type="number" min="0" step="1"
+        value="${g.elKwhA || ''}" placeholder="—"
+        style="width:64px;font-size:10px;padding:2px 5px;"
+        oninput="updateElAnschluss(${g.id},'kwha',this.value)"
+        title="Direkteingabe Jahresenergie"/>
+    </div>
+  </div>`;
+}
+
+function elUebernehmenVerbraucher(id) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  const r = calcElBedarf(g);
+  if (!r) return;
+  let asset = elVerbraucherFuerGebaeude(id);
+  if (asset) {
+    asset.props = asset.props || {};
+    asset.props.leistungKW = r.anschluss;
+    if (typeof elDrawMarker === 'function') elDrawMarker(asset);
+    if (typeof elCalc === 'function' && EL.assets.length > 0) elCalc();
+    showHint(`Verbraucher „${asset.name}": Leistung auf ${r.anschluss} kW gesetzt.`);
+  } else if (typeof elCreateAsset === 'function') {
+    const lat = pvCentroidLat(g), lng = pvCentroidLng(g);
+    const a = elCreateAsset('Verbraucher', lat + 0.00005, lng - 0.00010, {
+      buildingId: id,
+      name: 'Verbraucher ' + g.name,
+      props: { leistungKW: r.anschluss }
+    });
+    showHint(`Verbraucher-Asset angelegt: ${r.anschluss} kW.`);
+  }
+  renderList();
 }
 
 function pvUebernehmenEins(id) {
@@ -17337,16 +17520,18 @@ function pvKorrFaktor(azimuth, neigung) {
 function calcPvPotenzial(g) {
   if (!g.flaeche) return null;
   const pv      = g.pv || {};
-  const faktor  = pv.faktor  !== undefined ? pv.faktor  : 0.70;
-  const neigung = pv.neigung !== undefined ? pv.neigung : 30;
+  const dachtyp = pv.dachtyp || 'sattel';
+  const def     = PV_DACHTYP_DEFAULTS[dachtyp] || PV_DACHTYP_DEFAULTS.sattel;
+  const faktor  = pv.faktor  !== undefined ? pv.faktor  : def.faktor;
+  const neigung = pv.neigung !== undefined ? pv.neigung : def.neigung;
   const azimuth = pv.azimuth !== undefined ? pv.azimuth : 0;
   const nutzflaeche = g.flaeche * faktor;
-  const kwp         = nutzflaeche / 6.5;
+  const kwp         = nutzflaeche / pvGlobalParams.m2perKwp;
   const lat         = pvCentroidLat(g);
   const spezErtrag  = pvSpezErtrag(lat);
   const korr        = pvKorrFaktor(azimuth, neigung);
   const ertragJahr  = kwp * spezErtrag * korr;
-  const co2Jahr     = ertragJahr * 0.380;
+  const co2Jahr     = ertragJahr * (pvGlobalParams.co2 / 1000);
   return {
     nutzflaeche: Math.round(nutzflaeche),
     kwp:         Math.round(kwp * 10) / 10,
@@ -17362,7 +17547,44 @@ function pvSetField(id, field, value) {
   if (!g) return;
   if (!g.pv) g.pv = {};
   g.pv[field] = value;
+  if (field === 'azimuth') g.pv.azimuthAuto = false;
   renderPvPanel();
+}
+
+function pvSetDachtyp(id, typ) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  if (!g.pv) g.pv = {};
+  g.pv.dachtyp = typ;
+  const def = PV_DACHTYP_DEFAULTS[typ];
+  if (def) {
+    g.pv.faktor  = def.faktor;
+    g.pv.neigung = def.neigung;
+    if (def.autoAz) {
+      const az = pvAutoAzimuth(g);
+      g.pv.azimuth     = az !== null ? az : 0;
+      g.pv.azimuthAuto = az !== null;
+    } else {
+      g.pv.azimuth     = 0;
+      g.pv.azimuthAuto = false;
+    }
+  }
+  renderPvPanel();
+}
+
+function pvSetGlobal(field, value) {
+  pvGlobalParams[field] = value;
+  pvUpdateSummary();
+  // Re-render results without rebuilding the whole list to preserve input focus
+  document.querySelectorAll('[data-pv-result]').forEach(el => {
+    const id = parseInt(el.dataset.pvResult);
+    const g  = gebaeude.find(x => x.id === id);
+    if (!g) return;
+    const r = calcPvPotenzial(g);
+    const resEl = document.getElementById('pv-res-' + id);
+    if (resEl && r) resEl.innerHTML = pvResultHtml(r);
+  });
+  pvUpdateSummary();
 }
 
 function togglePvPanel() {
@@ -17394,6 +17616,27 @@ function pvUpdateSummary() {
     `<span style="color:#80cbc4;">${(totalCo2/1000).toFixed(1)} t CO₂/a</span>`;
 }
 
+function pvResultHtml(r) {
+  return `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">
+      <div style="background:var(--bg);border-radius:4px;padding:6px 4px;text-align:center;">
+        <div style="font-size:15px;color:#f9a825;font-family:'DM Mono',monospace;font-weight:500;">${r.kwp}</div>
+        <div style="font-size:9px;color:var(--muted);">kWp install.</div>
+      </div>
+      <div style="background:var(--bg);border-radius:4px;padding:6px 4px;text-align:center;">
+        <div style="font-size:15px;color:#4caf50;font-family:'DM Mono',monospace;font-weight:500;">${(r.ertragJahr/1000).toFixed(1)}</div>
+        <div style="font-size:9px;color:var(--muted);">MWh/a Ertrag</div>
+      </div>
+      <div style="background:var(--bg);border-radius:4px;padding:6px 4px;text-align:center;">
+        <div style="font-size:15px;color:#80cbc4;font-family:'DM Mono',monospace;font-weight:500;">${(r.co2Jahr/1000).toFixed(1)}</div>
+        <div style="font-size:9px;color:var(--muted);">t CO₂/a</div>
+      </div>
+    </div>
+    <div style="font-size:9px;color:var(--muted);margin-top:4px;">
+      Nutzfläche ${r.nutzflaeche} m² · ${r.spezErtrag} kWh/kWp·a · Korrekturfaktor ${r.korr}%
+    </div>`;
+}
+
 function renderPvPanel() {
   const container = document.getElementById('pv-list');
   container.innerHTML = '';
@@ -17405,25 +17648,37 @@ function renderPvPanel() {
     return;
   }
   mitFlaeche.forEach(g => {
-    const pv      = g.pv || {};
-    const faktor  = pv.faktor  !== undefined ? pv.faktor  : 0.70;
-    const neigung = pv.neigung !== undefined ? pv.neigung : 30;
-    const azimuth = pv.azimuth !== undefined ? pv.azimuth : 0;
-    const r = calcPvPotenzial(g);
+    const pv          = g.pv || {};
+    const dachtyp     = pv.dachtyp || 'sattel';
+    const def         = PV_DACHTYP_DEFAULTS[dachtyp] || PV_DACHTYP_DEFAULTS.sattel;
+    const faktor      = pv.faktor  !== undefined ? pv.faktor  : def.faktor;
+    const neigung     = pv.neigung !== undefined ? pv.neigung : def.neigung;
+    const azimuth     = pv.azimuth !== undefined ? pv.azimuth : 0;
+    const azimuthAuto = pv.azimuthAuto === true;
+    const r       = calcPvPotenzial(g);
     const elAsset = pvElAssetFuerGebaeude(g.id);
     const elKwp   = elAsset ? (parseFloat(elAsset.props?.leistungKWp) || 0) : null;
 
-    // Asset-Status: grün=übereinstimmend, orange=abweichend, grau=kein Asset
     let statusHtml = '';
     if (elAsset === null) {
       statusHtml = `<span style="font-size:9px;background:#2a3050;color:var(--muted);border-radius:3px;padding:1px 6px;">Kein Elektro-Asset</span>`;
     } else if (r && Math.abs(elKwp - r.kwp) < 0.2) {
-      statusHtml = `<span style="font-size:9px;background:#1b3a2a;color:#4caf50;border-radius:3px;padding:1px 6px;">✓ Asset ${elKwp} kWp</span>`;
+      statusHtml = `<span style="font-size:9px;background:#1b3a2a;color:#4caf50;border-radius:3px;padding:1px 6px;">✓ ${elKwp} kWp</span>`;
     } else {
-      statusHtml = `<span style="font-size:9px;background:#2a2010;color:#f9a825;border-radius:3px;padding:1px 6px;">Asset ${elKwp} kWp ≠ Potenzial ${r?.kwp} kWp</span>`;
+      statusHtml = `<span style="font-size:9px;background:#2a2010;color:#f9a825;border-radius:3px;padding:1px 6px;">Asset ${elKwp} kWp ≠ ${r?.kwp} kWp</span>`;
     }
 
+    const dtOptions = Object.entries(PV_DACHTYP_DEFAULTS)
+      .map(([k, d]) => `<option value="${k}"${dachtyp === k ? ' selected' : ''}>${d.label}</option>`).join('');
+
+    const hasPolygon = g.polygon && g.polygon.length >= 3;
+    const autoAzBtn  = def.autoAz && hasPolygon
+      ? `<button class="btn-xs" onclick="pvSetDachtyp(${g.id},'${dachtyp}')"
+          title="Azimut aus Polygon neu berechnen" style="flex-shrink:0;border-color:#4fc3f7;color:#4fc3f7;">
+          ↺ Neu</button>` : '';
+
     const row = document.createElement('div');
+    row.setAttribute('data-pv-result', g.id);
     row.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;border-left:3px solid #f9a825;';
     row.innerHTML = `
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;flex-wrap:wrap;">
@@ -17432,44 +17687,32 @@ function renderPvPanel() {
         ${statusHtml}
         ${r ? `<button class="btn-xs" onclick="pvUebernehmenEins(${g.id})"
           style="margin-left:auto;border-color:#f9a825;color:#f9a825;flex-shrink:0;"
-          title="Berechnetes kWp ins Elektromodul übernehmen">→ Übernehmen</button>` : ''}
+          title="kWp ins Elektromodul übernehmen">→ Übernehmen</button>` : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px;">
+        <div class="inp-label" style="white-space:nowrap;flex-shrink:0;">Dachtyp</div>
+        <select class="inp-field" style="flex:1;" onchange="pvSetDachtyp(${g.id},this.value)">${dtOptions}</select>
+        ${autoAzBtn}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:6px;">
         <div class="inp-group">
-          <div class="inp-label">Nutzflächen-Faktor</div>
-          <input class="inp-field" type="number" min="0.1" max="1" step="0.05" value="${faktor}"
-            oninput="pvSetField(${g.id},'faktor',parseFloat(this.value)||0.7)"/>
+          <div class="inp-label" title="Anteil der Grundfläche, der als PV-Nutzfläche angenommen wird">Nutzfaktor (% GF)</div>
+          <input class="inp-field" type="number" min="0.05" max="1" step="0.05" value="${faktor}"
+            oninput="pvSetField(${g.id},'faktor',parseFloat(this.value)||${def.faktor})"/>
         </div>
         <div class="inp-group">
           <div class="inp-label">Neigung °</div>
           <input class="inp-field" type="number" min="0" max="90" value="${neigung}"
-            oninput="pvSetField(${g.id},'neigung',parseFloat(this.value)||30)"/>
+            oninput="pvSetField(${g.id},'neigung',parseFloat(this.value)||${def.neigung})"/>
         </div>
         <div class="inp-group">
-          <div class="inp-label">Azimut v. Süd °</div>
+          <div class="inp-label">Azimut v. Süd °${azimuthAuto ? ' 🧭' : ''}</div>
           <input class="inp-field" type="number" min="-180" max="180" value="${azimuth}"
-            title="0=Süd, −90=Ost, +90=West, 180=Nord"
+            title="0=Süd · −90=Ost · +90=West · 180=Nord"
             oninput="pvSetField(${g.id},'azimuth',parseFloat(this.value)||0)"/>
         </div>
       </div>
-      ${r ? `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">
-        <div style="background:var(--bg);border-radius:4px;padding:6px 4px;text-align:center;">
-          <div style="font-size:15px;color:#f9a825;font-family:'DM Mono',monospace;font-weight:500;">${r.kwp}</div>
-          <div style="font-size:9px;color:var(--muted);">kWp install.</div>
-        </div>
-        <div style="background:var(--bg);border-radius:4px;padding:6px 4px;text-align:center;">
-          <div style="font-size:15px;color:#4caf50;font-family:'DM Mono',monospace;font-weight:500;">${(r.ertragJahr/1000).toFixed(1)}</div>
-          <div style="font-size:9px;color:var(--muted);">MWh/a Ertrag</div>
-        </div>
-        <div style="background:var(--bg);border-radius:4px;padding:6px 4px;text-align:center;">
-          <div style="font-size:15px;color:#80cbc4;font-family:'DM Mono',monospace;font-weight:500;">${(r.co2Jahr/1000).toFixed(1)}</div>
-          <div style="font-size:9px;color:var(--muted);">t CO₂/a</div>
-        </div>
-      </div>
-      <div style="font-size:9px;color:var(--muted);margin-top:4px;">
-        Nutzfläche ${r.nutzflaeche} m² · Spez. Ertrag ${r.spezErtrag} kWh/kWp·a · Korrekturfaktor ${r.korr}%
-      </div>` : ''}`;
+      <div id="pv-res-${g.id}">${r ? pvResultHtml(r) : ''}</div>`;
     container.appendChild(row);
   });
   if (ohneFlaeche.length) {
@@ -18053,9 +18296,27 @@ elInit();   // Elektro-Modul starten (nach map-Init, einmalig)
     <span class="drag-dots">⠿</span>
   </div>
   <div class="panel-info">
-    Vereinfachte Potenzialabschätzung auf Basis der Gebäude-Grundfläche.
-    Azimut: 0 = Süd · −90 = Ost · +90 = West · 180 = Nord.
-    Spez. Ertrag wird automatisch aus dem Standort (Breitengrad) ermittelt.
+    Potenzialabschätzung auf Basis der Gebäude-Grundfläche. Azimut aus Kartenpolygon wird bei Dachtypwahl automatisch berechnet.
+  </div>
+  <div style="padding:7px 14px;border-bottom:1px solid var(--border);background:var(--surface2);flex-shrink:0;">
+    <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;">Globale Annahmen</div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+      <div class="inp-group" style="flex:0 0 auto;">
+        <div class="inp-label">Modulkennwert m²/kWp</div>
+        <input class="inp-field" type="number" min="4" max="10" step="0.1" id="pv-param-m2kwp" value="6.0"
+          style="width:72px;" oninput="pvSetGlobal('m2perKwp',parseFloat(this.value)||6.0)"
+          title="Aktuelle Standardmodule: 5–6 m²/kWp (165–200 Wp/m²). Konservativ: 6.5 m²/kWp."/>
+      </div>
+      <div class="inp-group" style="flex:0 0 auto;">
+        <div class="inp-label">CO₂-Faktor g/kWh</div>
+        <input class="inp-field" type="number" min="100" max="700" step="10" id="pv-param-co2" value="380"
+          style="width:68px;" oninput="pvSetGlobal('co2',parseFloat(this.value)||380)"
+          title="Dt. Strommix 2023: ~380 g CO₂/kWh (UBA)"/>
+      </div>
+      <div style="font-size:9px;color:var(--muted);padding-bottom:2px;">
+        Nutzfaktor je Dachtyp: Flach 30 % · Sattel 40 % · Pult 50 % · Walm 35 % (der GF)
+      </div>
+    </div>
   </div>
   <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex-shrink:0;">
     <span style="font-size:10px;color:var(--muted);">Gesamt:</span>
