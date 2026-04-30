@@ -4395,6 +4395,7 @@ function renderList(){
     const badgeClass=g.polygon?(g.fromOsm?'osm':'ok'):'';
     const badgeText=g.polygon?(g.fromOsm?'OSM':'✓'):'–';
     const dot=cardDotColor(g);
+    const elBedarf=calcElBedarf(g);
     
     let infoLabel = '';
     if(stats.status === 'geplant') infoLabel = '<span style="color:#f9a825;font-size:10px;margin-left:auto">Geplant</span>';
@@ -4477,6 +4478,25 @@ function renderList(){
             oninput="updateField(${g.id},'flaeche',this.value)"/>
         </div>
       </div>
+      ${elBedarf ? (() => {
+        const vb = elVerbraucherFuerGebaeude(g.id);
+        const vbKw = vb ? (parseFloat(vb.props?.leistungKW) || 0) : null;
+        const match = vb && Math.abs(vbKw - elBedarf.anschluss) < 0.2;
+        const statusCol = vb ? (match ? '#4caf50' : '#f9a825') : 'var(--muted)';
+        const statusTxt = vb ? (match ? `✓ ${vbKw} kW` : `Asset: ${vbKw} kW`) : 'kein Asset';
+        return `<div style="display:flex;align-items:center;gap:5px;margin-top:5px;background:var(--bg);
+          border-radius:4px;padding:4px 8px;border-left:2px solid rgba(249,168,37,.5);">
+          <span style="font-size:10px;color:#f9a825;">⚡</span>
+          <span style="font-size:9px;color:var(--muted);">El. Bedarf:</span>
+          <span style="font-size:10px;font-family:'DM Mono',monospace;">${elBedarf.anschluss} kW</span>
+          <span style="font-size:9px;color:var(--muted);">&nbsp;·&nbsp;${elBedarf.jahresenergie} MWh/a</span>
+          <span style="font-size:9px;color:${statusCol};margin-left:4px;">${statusTxt}</span>
+          <button class="btn-xs" onclick="elUebernehmenVerbraucher(${g.id})"
+            style="margin-left:auto;border-color:#f9a825;color:#f9a825;font-size:9px;flex-shrink:0;"
+            title="Leistung in verknüpften Verbraucher-Asset schreiben (${elBedarf.spezEl} kWh/m²a · ${elBedarf.spezElHL} W/m²)">
+            → Asset</button>
+        </div>`;
+      })() : ''}
       <div class="geb-actions">
         <button class="btn-xs blue" onclick="startDraw(${g.id})">&#9998; ${g.polygon ? 'Neu' : 'Zeichnen'}</button>
         ${g.polygon ? '<button class="btn-xs purple" onclick="flyTo(' + g.id + ')">&#8982;</button>' : ''}
@@ -5270,14 +5290,16 @@ animatePipes();
 
 
 // ── Nutzungstyp default-Kennwerte ────────────────────────────────────
+// spez/spezHL: Wärme (kWh/m²a, W/m²) · spezEl/spezElHL: Strom (kWh/m²a, W/m²) je NFA
+// Elektrische Werte orientiert an VDI 3807-2, DENA Energieverbrauch, SIA 380/4
 const NUTZUNG_DEFAULTS = {
-  efh:        { spez: 180, spezHL: 80,  label: 'EFH' },
-  mfh:        { spez: 120, spezHL: 60,  label: 'MFH' },
-  ghd:        { spez: 100, spezHL: 50,  label: 'GHD' },
-  schule:     { spez: 80,  spezHL: 40,  label: 'Schule' },
-  buero:      { spez: 90,  spezHL: 45,  label: 'Büro' },
-  industrie:  { spez: 200, spezHL: 100, label: 'Industrie' },
-  oeffentlich:{ spez: 110, spezHL: 55,  label: 'Öffentlich' },
+  efh:        { spez: 180, spezHL: 80,  spezEl: 30,  spezElHL: 8,  label: 'EFH' },
+  mfh:        { spez: 120, spezHL: 60,  spezEl: 25,  spezElHL: 6,  label: 'MFH' },
+  ghd:        { spez: 100, spezHL: 50,  spezEl: 60,  spezElHL: 25, label: 'GHD' },
+  schule:     { spez: 80,  spezHL: 40,  spezEl: 20,  spezElHL: 10, label: 'Schule' },
+  buero:      { spez: 90,  spezHL: 45,  spezEl: 50,  spezElHL: 20, label: 'Büro' },
+  industrie:  { spez: 200, spezHL: 100, spezEl: 120, spezElHL: 50, label: 'Industrie' },
+  oeffentlich:{ spez: 110, spezHL: 55,  spezEl: 40,  spezElHL: 15, label: 'Öffentlich' },
 };
 
 function setNutzung(id, nutzung) {
@@ -17323,6 +17345,46 @@ function pvAutoAzimuth(g) {
 function pvElAssetFuerGebaeude(gId) {
   const alle = typeof elGetMergedAssets === 'function' ? elGetMergedAssets() : (EL?.assets || []);
   return alle.find(a => a.type === 'PV' && a.buildingId === gId) || null;
+}
+
+function elVerbraucherFuerGebaeude(gId) {
+  const alle = typeof elGetMergedAssets === 'function' ? elGetMergedAssets() : (EL?.assets || []);
+  return alle.find(a => a.type === 'Verbraucher' && a.buildingId === gId) || null;
+}
+
+// NFA = BGF × Stockwerke × 0.8 (konsistent mit Wärmeberechnung)
+function calcElBedarf(g) {
+  if (!g.flaeche || !g.nutzung) return null;
+  const def = NUTZUNG_DEFAULTS[g.nutzung];
+  if (!def || !def.spezEl) return null;
+  const nfa          = g.flaeche * (g.stockwerke || 1) * 0.8;
+  const jahresenergie = Math.round(nfa * def.spezEl / 100) / 10;   // MWh/a, 1 Dp.
+  const anschluss    = Math.round(nfa * def.spezElHL / 100) / 10;  // kW, 1 Dp.
+  return { nfa: Math.round(nfa), jahresenergie, anschluss, spezEl: def.spezEl, spezElHL: def.spezElHL };
+}
+
+function elUebernehmenVerbraucher(id) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  const r = calcElBedarf(g);
+  if (!r) return;
+  let asset = elVerbraucherFuerGebaeude(id);
+  if (asset) {
+    asset.props = asset.props || {};
+    asset.props.leistungKW = r.anschluss;
+    if (typeof elDrawMarker === 'function') elDrawMarker(asset);
+    if (typeof elCalc === 'function' && EL.assets.length > 0) elCalc();
+    showHint(`Verbraucher „${asset.name}": Leistung auf ${r.anschluss} kW gesetzt.`);
+  } else if (typeof elCreateAsset === 'function') {
+    const lat = pvCentroidLat(g), lng = pvCentroidLng(g);
+    const a = elCreateAsset('Verbraucher', lat + 0.00005, lng - 0.00010, {
+      buildingId: id,
+      name: 'Verbraucher ' + g.name,
+      props: { leistungKW: r.anschluss }
+    });
+    showHint(`Verbraucher-Asset angelegt: ${r.anschluss} kW.`);
+  }
+  renderList();
 }
 
 function pvUebernehmenEins(id) {
