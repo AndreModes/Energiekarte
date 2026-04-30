@@ -4538,6 +4538,8 @@ function exportJSON(){
       feldBericht: g.feldBericht || null,
       elAnschluss: g.elAnschluss || null,
       elKwhA: g.elKwhA || null,
+      spezElOverride:   g.spezElOverride   != null ? g.spezElOverride   : null,
+      spezElHLOverride: g.spezElHLOverride != null ? g.spezElHLOverride : null,
     })),
     netz: {
       zentrale: document.getElementById('netz-zentrale').value,
@@ -5077,6 +5079,10 @@ function importJSON(event) {
             newG.huelle      = g.huelle      || null;
             newG.pv          = g.pv          || null;
             newG.feldBericht = g.feldBericht || null;
+            newG.elAnschluss      = g.elAnschluss      || null;
+            newG.elKwhA           = g.elKwhA           || null;
+            newG.spezElOverride   = g.spezElOverride   != null ? g.spezElOverride   : null;
+            newG.spezElHLOverride = g.spezElHLOverride != null ? g.spezElHLOverride : null;
             if (g.id >= idCounter) idCounter = g.id + 1;
          });
       }
@@ -5471,6 +5477,8 @@ function autosave() {
         polygon: g.polygon, baujahr: g.baujahr, abrissjahr: g.abrissjahr,
         sanierungen: g.sanierungen, huelle: g.huelle || null,
         elAnschluss: g.elAnschluss || null, elKwhA: g.elKwhA || null,
+        spezElOverride:   g.spezElOverride   != null ? g.spezElOverride   : null,
+        spezElHLOverride: g.spezElHLOverride != null ? g.spezElHLOverride : null,
       })),
       netz: {
         zentrale: document.getElementById('netz-zentrale').value,
@@ -5531,7 +5539,9 @@ function loadAutosave() {
         Object.assign(newG, { waerme: g.waerme, heizlast: g.heizlast, spez: g.spez, spezHeizlast: g.spezHeizlast,
           flaeche: g.flaeche, nutzung: g.nutzung||'', baujahr: g.baujahr, abrissjahr: g.abrissjahr, sanierungen: g.sanierungen||[],
           huelle: g.huelle||null, pv: g.pv||null, feldBericht: g.feldBericht||null,
-          elAnschluss: g.elAnschluss||null, elKwhA: g.elKwhA||null });
+          elAnschluss: g.elAnschluss||null, elKwhA: g.elKwhA||null,
+          spezElOverride:   g.spezElOverride   != null ? g.spezElOverride   : null,
+          spezElHLOverride: g.spezElHLOverride != null ? g.spezElHLOverride : null });
         if (g.id >= idCounter) idCounter = g.id + 1;
       });
     }
@@ -17365,12 +17375,17 @@ function calcElBedarf(g) {
   if (!g.flaeche || !g.nutzung) return null;
   const def = NUTZUNG_DEFAULTS[g.nutzung];
   if (!def || !def.spezEl) return null;
-  const nfa           = g.flaeche * (g.stockwerke || 1) * 0.8;
-  const jahresenergie = Math.round(nfa * def.spezEl  / 100) / 10;
-  const anschluss     = Math.round(nfa * def.spezElHL / 100) / 10;
+  const nfa      = g.flaeche * (g.stockwerke || 1) * 0.8;
+  const spezEl   = (g.spezElOverride   != null && g.spezElOverride   !== '') ? parseFloat(g.spezElOverride)   : def.spezEl;
+  const spezElHL = (g.spezElHLOverride != null && g.spezElHLOverride !== '') ? parseFloat(g.spezElHLOverride) : def.spezElHL;
+  const jahresenergie = Math.round(nfa * spezEl  / 100) / 10;
+  const anschluss     = Math.round(nfa * spezElHL / 100) / 10;
+  const hasOverride   = g.spezElOverride != null || g.spezElHLOverride != null;
   return { nfa:Math.round(nfa), jahresenergie, anschluss,
-           spezEl:def.spezEl, spezElHL:def.spezElHL,
-           guete:def.guete||'hoch', hint:def.hint||null, manuell:false };
+           spezEl, spezElHL,
+           defaultSpezEl:def.spezEl, defaultSpezElHL:def.spezElHL,
+           guete: hasOverride ? 'angepasst' : (def.guete||'hoch'),
+           hint:def.hint||null, manuell:false, hasOverride };
 }
 
 function updateElAnschluss(id, field, value) {
@@ -17379,6 +17394,21 @@ function updateElAnschluss(id, field, value) {
   const v = value === '' ? null : value;
   if (field === 'anschluss') g.elAnschluss = v;
   if (field === 'kwha')      g.elKwhA      = v;
+  renderList();
+}
+
+function updateElAnnahmen(id, field, value) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  g[field] = value === '' ? null : value;
+  renderList();
+}
+
+function resetElAnnahmen(id) {
+  const g = gebaeude.find(x => x.id === id);
+  if (!g) return;
+  g.spezElOverride   = null;
+  g.spezElHLOverride = null;
   renderList();
 }
 
@@ -17393,15 +17423,37 @@ function renderElBedarfRow(g) {
 
   const gueteBadge = r.manuell
     ? `<span style="font-size:8px;background:#1b2a3a;color:#4fc3f7;border-radius:2px;padding:1px 5px;">Manuell</span>`
-    : r.guete === 'hoch'
-      ? `<span style="font-size:8px;background:#1b3a2a;color:#4caf50;border-radius:2px;padding:1px 5px;">±20%</span>`
-      : r.guete === 'mittel'
-        ? `<span style="font-size:8px;background:#2a2010;color:#f9a825;border-radius:2px;padding:1px 5px;">orientierend</span>`
-        : `<span style="font-size:8px;background:#2a1010;color:#e53935;border-radius:2px;padding:1px 5px;">⚠ ungenau</span>`;
+    : r.guete === 'angepasst'
+      ? `<span style="font-size:8px;background:#1b2a3a;color:#b39ddb;border-radius:2px;padding:1px 5px;">Angepasst</span>`
+      : r.guete === 'hoch'
+        ? `<span style="font-size:8px;background:#1b3a2a;color:#4caf50;border-radius:2px;padding:1px 5px;">±20%</span>`
+        : r.guete === 'mittel'
+          ? `<span style="font-size:8px;background:#2a2010;color:#f9a825;border-radius:2px;padding:1px 5px;">orientierend</span>`
+          : `<span style="font-size:8px;background:#2a1010;color:#e53935;border-radius:2px;padding:1px 5px;">⚠ ungenau</span>`;
 
   const kwhaTxt = r.jahresenergie !== null ? `&nbsp;·&nbsp;${r.jahresenergie} MWh/a` : '';
   const hintHtml = !r.manuell && r.guete === 'gering' && r.hint
     ? `<div style="font-size:9px;color:#ef9a9a;margin-top:3px;line-height:1.4;">⚠ ${r.hint}</div>` : '';
+
+  const defSpezEl   = r.defaultSpezEl   ?? '—';
+  const defSpezElHL = r.defaultSpezElHL ?? '—';
+  const annahmenRow = !r.manuell ? `
+    <div style="display:flex;align-items:center;gap:4px;margin-top:4px;flex-wrap:wrap;">
+      <span style="font-size:9px;color:var(--muted);white-space:nowrap;">Annahmen:</span>
+      <span style="font-size:9px;color:var(--muted);white-space:nowrap;">kWh/m²a:</span>
+      <input class="inp-field" type="number" min="0" step="1"
+        value="${g.spezElOverride != null ? g.spezElOverride : ''}" placeholder="${defSpezEl}"
+        style="width:60px;font-size:10px;padding:2px 5px;${g.spezElOverride != null ? 'color:#b39ddb;' : ''}"
+        oninput="updateElAnnahmen(${g.id},'spezElOverride',this.value)"
+        title="Spezifischer Jahresstrombedarf je NFA (kWh/m²a). Leer = Standardwert (${defSpezEl})"/>
+      <span style="font-size:9px;color:var(--muted);white-space:nowrap;">W/m²:</span>
+      <input class="inp-field" type="number" min="0" step="1"
+        value="${g.spezElHLOverride != null ? g.spezElHLOverride : ''}" placeholder="${defSpezElHL}"
+        style="width:56px;font-size:10px;padding:2px 5px;${g.spezElHLOverride != null ? 'color:#b39ddb;' : ''}"
+        oninput="updateElAnnahmen(${g.id},'spezElHLOverride',this.value)"
+        title="Spezifische el. Anschlussleistung je NFA (W/m²). Leer = Standardwert (${defSpezElHL})"/>
+      ${r.hasOverride ? `<button class="btn-xs" onclick="resetElAnnahmen(${g.id})" style="font-size:9px;color:var(--muted);" title="Auf Standardwerte zurücksetzen">↺</button>` : ''}
+    </div>` : '';
 
   return `<div style="margin-top:5px;background:var(--bg);border-radius:4px;padding:5px 8px;border-left:2px solid rgba(249,168,37,.5);">
     <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
@@ -17416,19 +17468,20 @@ function renderElBedarfRow(g) {
         title="Leistung in verknüpften Verbraucher-Asset schreiben">→ Asset</button>
     </div>
     ${hintHtml}
+    ${annahmenRow}
     <div style="display:flex;align-items:center;gap:4px;margin-top:4px;">
       <span style="font-size:9px;color:var(--muted);white-space:nowrap;">Direkt kW:</span>
       <input class="inp-field" type="number" min="0" step="0.5"
         value="${g.elAnschluss || ''}" placeholder="—"
         style="width:72px;font-size:10px;padding:2px 5px;"
         oninput="updateElAnschluss(${g.id},'anschluss',this.value)"
-        title="Direkteingabe überschreibt Schätzwert (z.B. aus Messung oder Ausschreibung)"/>
+        title="Direkteingabe überschreibt Schätzwert vollständig (z.B. aus Messung oder Ausschreibung)"/>
       <span style="font-size:9px;color:var(--muted);white-space:nowrap;">MWh/a:</span>
       <input class="inp-field" type="number" min="0" step="1"
         value="${g.elKwhA || ''}" placeholder="—"
         style="width:64px;font-size:10px;padding:2px 5px;"
         oninput="updateElAnschluss(${g.id},'kwha',this.value)"
-        title="Direkteingabe Jahresenergie"/>
+        title="Direkteingabe Jahresenergie (überschreibt Schätzwert)"/>
     </div>
   </div>`;
 }
