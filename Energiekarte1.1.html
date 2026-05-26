@@ -1303,12 +1303,16 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
 <div id="edge-popup" class="edge-popup" style="display:none;"></div>
 
 <script>
-// When opened as file://, browsers block cross-origin requests (null origin).
-// Route Overpass queries through a CORS proxy in that case.
+// When opened as file://, browsers assign a null origin and block cross-origin POST.
+// For file:// access: convert to GET and route through allorigins.win (returns
+// Access-Control-Allow-Origin: * which covers null origins; forwards status codes).
 const _OVERPASS_DIRECT = 'https://overpass-api.de/api/interpreter';
-const _OVERPASS_PROXY  = 'https://corsproxy.io/?' + encodeURIComponent(_OVERPASS_DIRECT);
-function overpassUrl() {
-  return location.protocol === 'file:' ? _OVERPASS_PROXY : _OVERPASS_DIRECT;
+function overpassFetch(query) {
+  if (location.protocol !== 'file:') {
+    return fetch(_OVERPASS_DIRECT, {method:'POST', body:'data='+encodeURIComponent(query)});
+  }
+  const target = _OVERPASS_DIRECT + '?data=' + encodeURIComponent(query);
+  return fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(target));
 }
 
 let gebaeude = [];
@@ -3644,7 +3648,7 @@ out body;>;out skel qt;`;
     }
     showHint(`OSM-Gebäude werden geladen… (Versuch ${attempt + 1}/${RETRY_DELAYS.length})`);
     try {
-      const resp = await fetch(overpassUrl(), {method:'POST', body:'data='+encodeURIComponent(query)});
+      const resp = await overpassFetch(query);
       if (resp.status === 429 || resp.status === 504 || resp.status === 502 || resp.status === 503) {
         lastErr = new Error(`HTTP ${resp.status} – Server überlastet`);
         continue; // retry
@@ -5610,8 +5614,7 @@ async function queryOsmRoadType(latA, lngA, latB, lngB) {
   const bbox = `${midLat-delta},${midLng-delta},${midLat+delta},${midLng+delta}`;
   const q = `[out:json][timeout:5];way["highway"](${bbox});out tags 1;`;
   try {
-    const r = await fetch(overpassUrl(),
-      {method:'POST', body:'data='+encodeURIComponent(q)});
+    const r = await overpassFetch(q);
     const d = await r.json();
     if (d.elements && d.elements.length > 0) {
       const hw = d.elements[0].tags?.highway || '';
