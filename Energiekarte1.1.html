@@ -1303,6 +1303,14 @@ header{display:flex;align-items:center;justify-content:space-between;padding:6px
 <div id="edge-popup" class="edge-popup" style="display:none;"></div>
 
 <script>
+// When opened as file://, browsers block cross-origin requests (null origin).
+// Route Overpass queries through a CORS proxy in that case.
+const _OVERPASS_DIRECT = 'https://overpass-api.de/api/interpreter';
+const _OVERPASS_PROXY  = 'https://corsproxy.io/?' + encodeURIComponent(_OVERPASS_DIRECT);
+function overpassUrl() {
+  return location.protocol === 'file:' ? _OVERPASS_PROXY : _OVERPASS_DIRECT;
+}
+
 let gebaeude = [];
 let currentMode = 'waerme';
 let currentViz  = 'circle';
@@ -3636,7 +3644,7 @@ out body;>;out skel qt;`;
     }
     showHint(`OSM-Gebäude werden geladen… (Versuch ${attempt + 1}/${RETRY_DELAYS.length})`);
     try {
-      const resp = await fetch('https://overpass-api.de/api/interpreter', {method:'POST', body:'data='+encodeURIComponent(query)});
+      const resp = await fetch(overpassUrl(), {method:'POST', body:'data='+encodeURIComponent(query)});
       if (resp.status === 429 || resp.status === 504 || resp.status === 502 || resp.status === 503) {
         lastErr = new Error(`HTTP ${resp.status} – Server überlastet`);
         continue; // retry
@@ -5602,7 +5610,7 @@ async function queryOsmRoadType(latA, lngA, latB, lngB) {
   const bbox = `${midLat-delta},${midLng-delta},${midLat+delta},${midLng+delta}`;
   const q = `[out:json][timeout:5];way["highway"](${bbox});out tags 1;`;
   try {
-    const r = await fetch('https://overpass-api.de/api/interpreter',
+    const r = await fetch(overpassUrl(),
       {method:'POST', body:'data='+encodeURIComponent(q)});
     const d = await r.json();
     if (d.elements && d.elements.length > 0) {
